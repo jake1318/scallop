@@ -1,0 +1,388 @@
+.lending-modal-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(18, 28, 35, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.lending-modal {
+  background: #181f2a;
+  border-radius: 16px;
+  padding: 32px 24px 24px;
+  width: 340px;
+  box-shadow: 0 0 16px #00e1ff44;
+  position: relative;
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+.close-btn {
+  position: absolute;
+  right: 18px;
+  top: 10px;
+  font-size: 22px;
+  background: none;
+  border: none;
+  color: #ff66a1;
+  cursor: pointer;
+}
+h3 {
+  text-align: center;
+  margin-bottom: 20px;
+  font-size: 1.35rem;
+}
+.input-group input {
+  width: 100%;
+  padding: 14px;
+  border-radius: 8px;
+  border: none;
+  background: #222c3b;
+  color: #fff;
+  font-size: 1.1rem;
+  margin-bottom: 18px;
+  outline: none;
+  box-shadow: 0 0 4px #00e1ff88;
+}
+.action-btn {
+  width: 100%;
+  padding: 13px;
+  background: linear-gradient(90deg, #00e1ff 0%, #af6aff 100%);
+  border: none;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 1rem;
+  font-weight: bold;
+  margin-bottom: 10px;
+  cursor: pointer;
+  transition: background 0.15s;
+  &:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+  }
+}
+.modal-status {
+  text-align: center;
+  margin-top: 12px;
+  color: #00e1ff;
+  min-height: 18px;
+  font-size: 0.98rem;
+}
+/* Add these styles to your existing LendingActionModal.scss file */
+
+.transaction-details {
+  margin-top: 12px;
+  padding: 10px;
+  background-color: rgba(0, 0, 0, 0.05);
+  border-radius: 6px;
+  font-size: 0.9em;
+}
+
+.transaction-details code {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background-color: rgba(0, 0, 0, 0.1);
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-family: monospace;
+}
+
+.tx-link {
+  display: inline-block;
+  color: #1a73e8;
+  text-decoration: none;
+  padding: 4px 10px;
+  margin-top: 6px;
+  border: 1px solid #1a73e8;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.tx-link:hover {
+  background-color: #1a73e8;
+  color: white;
+}
+/* Add these styles to your existing LendingActionModal.scss file */
+
+.transaction-details {
+  margin-top: 12px;
+  padding: 10px;
+  background-color: rgba(0, 0, 0, 0.05);
+  border-radius: 6px;
+  font-size: 0.9em;
+}
+
+.transaction-details code {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background-color: rgba(0, 0, 0, 0.1);
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-family: monospace;
+}
+
+.tx-link {
+  display: inline-block;
+  color: #1a73e8;
+  text-decoration: none;
+  padding: 4px 10px;
+  margin-top: 6px;
+  border: 1px solid #1a73e8;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.tx-link:hover {
+  background-color: #1a73e8;
+  color: white;
+}
+
+.tx-note {
+  font-style: italic;
+  font-size: 0.9em;
+  color: #666;
+  margin-top: 8px;
+}
+
+/* Status styles */
+.modal-status {
+  margin-top: 15px;
+  padding: 10px;
+  border-radius: 6px;
+}
+
+.modal-status.success {
+  background-color: rgba(76, 175, 80, 0.1);
+  color: #2e7d32;
+}
+
+.modal-status.error {
+  background-color: rgba(244, 67, 54, 0.1);
+  color: #d32f2f;
+}
+
+.modal-status.pending,
+.modal-status.confirming {
+  background-color: rgba(255, 152, 0, 0.1);
+  color: #ef6c00;
+}
+
+.close-action-btn {
+  padding: 8px 16px;
+  background-color: #6c757d;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 16px;
+  transition: background-color 0.2s;
+}
+
+.close-action-btn:hover {
+  background-color: #5a6268;
+}
+/* Add these styles to your existing LendingPage.scss file */
+
+.user-positions-summary {
+  margin-bottom: 30px;
+  padding: 20px;
+  background-color: rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.user-positions-summary h3 {
+  margin-top: 0;
+  font-size: 1.2rem;
+  color: #ffffff;
+  margin-bottom: 15px;
+}
+
+.user-positions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 15px;
+}
+
+.user-position-card {
+  background-color: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  padding: 15px;
+  display: flex;
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: all 0.2s ease;
+}
+
+.user-position-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+}
+
+.position-icon {
+  width: 40px;
+  height: 40px;
+  margin-right: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.position-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 50%;
+}
+
+.position-details {
+  flex: 1;
+}
+
+.position-details h4 {
+  margin: 0 0 8px;
+  font-size: 1.1rem;
+}
+
+.position-values {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  margin-bottom: 12px;
+  font-size: 0.9rem;
+}
+
+.position-values div {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 8px;
+}
+
+.position-values .label {
+  color: #999;
+  font-size: 0.8rem;
+  margin-bottom: 2px;
+}
+
+.position-values .value {
+  font-weight: 500;
+}
+
+.position-values .value.positive {
+  color: #4caf50;
+}
+
+.position-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.position-actions button {
+  padding: 6px 10px;
+  font-size: 0.85rem;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 500;
+  flex: 1;
+  transition: all 0.2s;
+}
+
+.deposit-btn {
+  background-color: #1e88e5;
+  color: white;
+}
+
+.deposit-btn:hover {
+  background-color: #1565c0;
+}
+
+.withdraw-btn {
+  background-color: #546e7a;
+  color: white;
+}
+
+.withdraw-btn:hover {
+  background-color: #455a64;
+}
+
+/* Add to your existing table styles */
+.lending-table td.asset-cell,
+.lending-table td.apy-cell {
+  white-space: nowrap;
+}
+
+.lending-table .user-value {
+  color: #1e88e5;
+  font-weight: 500;
+}
+
+.lending-table .actions-cell {
+  display: flex;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.lending-table .actions-cell button {
+  padding: 6px 10px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.borrow-btn {
+  background-color: #7b1fa2;
+  color: white;
+}
+
+.borrow-btn:hover {
+  background-color: #6a1b9a;
+}
+
+.repay-btn {
+  background-color: #546e7a;
+  color: white;
+}
+
+.repay-btn:hover {
+  background-color: #455a64;
+}
+/* Add these styles to your existing LendingPage.scss file */
+
+.debug-section {
+  margin-bottom: 15px;
+  display: flex;
+  align-items: center;
+}
+
+.debug-btn {
+  background-color: #444;
+  color: #fff;
+  border: none;
+  padding: 5px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.debug-btn:hover {
+  background-color: #555;
+}
+
+.debug-info {
+  margin-left: 10px;
+  font-size: 0.85rem;
+  padding: 5px 10px;
+  background-color: rgba(76, 175, 80, 0.1);
+  border-radius: 4px;
+  color: #4caf50;
+}

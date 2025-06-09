@@ -1,0 +1,61 @@
+// src/styles/global.scss
+// Global styles for Sui Scallop Lending App
+
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap");
+
+body {
+  background: #0e1b2a;
+  margin: 0;
+  padding: 0;
+  font-family: "Inter", Arial, Helvetica, sans-serif;
+  color: #e4f0fc;
+  font-size: 16px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+a {
+  color: #00c2ff;
+  text-decoration: none;
+  transition: color 0.15s;
+  &:hover {
+    color: #00ffc2;
+  }
+}
+
+input,
+button {
+  font-family: inherit;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  background: #142137;
+}
+::-webkit-scrollbar-thumb {
+  background: #12c2e955;
+  border-radius: 5px;
+}
+
+// Utility classes
+.text-center {
+  text-align: center;
+}
+
+.flex {
+  display: flex;
+}
+
+.flex-center {
+  align-items: center;
+  justify-content: center;
+}
+
+.card {
+  background: #171e2c;
+  border-radius: 16px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 12px 0 #00c2ff33;
+}

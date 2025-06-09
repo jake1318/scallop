@@ -1,0 +1,27 @@
+{
+  "name": "scallop-backend-proxy",
+  "version": "1.0.0",
+  "description": "Proxy server for Sui/Scallop frontend (handles CORS, rate limits)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "@mysten/bcs": "^1.6.1",
+    "@mysten/sui.js": "^0.53.0",
+    "@scallop-io/sui-scallop-sdk": "^2.2.0",
+    "@mysten/sui": "1.28.2",
+    "axios": "^1.9.0",
+    "@scallop-io/sui-kit": "1.4.1",
+    "bech32": "^2.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.5.0",
+    "express": "^4.21.2",
+    "http-proxy-middleware": "^3.0.5",
+    "node-fetch": "^2.6.9"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.22"
+  }
+}
