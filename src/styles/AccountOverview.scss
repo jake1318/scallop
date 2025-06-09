@@ -1,0 +1,82 @@
+.account-overview {
+  background: #111827;
+  color: #e5e7eb;
+  padding: 1rem;
+  border-radius: 6px;
+  margin-bottom: 1.5rem;
+  .card-header {
+    h2 {
+      color: #93c5fd;
+      margin: 0;
+    }
+  }
+  .summary-line {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    div {
+      font-size: 0.95rem;
+      &.net-apr {
+        margin-left: auto;
+      }
+      span {
+        font-weight: 600;
+        margin-left: 0.25rem;
+      }
+    }
+  }
+  .limits-line {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.85rem;
+    margin: 0.5rem 0;
+    .value {
+      font-weight: 600;
+    }
+    .label {
+      color: #9ca3af;
+    }
+  }
+  .health-bar {
+    margin: 0.5rem 0;
+    .bar-bg {
+      position: relative;
+      height: 6px;
+      background: #374151;
+      border-radius: 3px;
+      .bar-fill {
+        position: absolute;
+        top: 0;
+        left: 0;
+        height: 6px;
+        background: #3b82f6;
+        border-radius: 3px 0 0 3px;
+      }
+      .bar-marker {
+        position: absolute;
+        top: -2px;
+        width: 2px;
+        height: 10px;
+        background: #fbbf24;
+        &.liq {
+          background: #ef4444;
+          left: 100%;
+        }
+      }
+    }
+  }
+  .breakdown-toggle {
+    color: #93c5fd;
+    cursor: pointer;
+    &:hover {
+      text-decoration: underline;
+    }
+  }
+  .breakdown-details {
+    margin-top: 0.5rem;
+    background: #1f2937;
+    padding: 0.5rem;
+    border-radius: 4px;
+    font-size: 0.85rem;
+  }
+}

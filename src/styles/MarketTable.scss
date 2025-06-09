@@ -1,0 +1,69 @@
+.market-table {
+  background: #111827;
+  color: #e5e7eb;
+  padding: 1rem;
+  border-radius: 6px;
+  margin-bottom: 1.5rem;
+  .card-header {
+    h2 {
+      color: #93c5fd;
+      margin: 0;
+    }
+  }
+  .market-summary {
+    display: flex;
+    gap: 2rem;
+    font-size: 0.9rem;
+    margin-bottom: 0.5rem;
+    div {
+      color: #9ca3af;
+    }
+    .summary-value {
+      font-weight: 600;
+      color: #e5e7eb;
+      margin-left: 0.25rem;
+    }
+  }
+  .reserves-table {
+    width: 100%;
+    border-collapse: collapse;
+    thead {
+      border-bottom: 1px solid #374151;
+      th {
+        font-size: 0.8rem;
+        color: #9ca3af;
+        padding-bottom: 0.3rem;
+      }
+    }
+    tbody {
+      font-size: 0.9rem;
+      tr {
+        border-bottom: 1px solid #1f2937;
+      }
+      td {
+        padding: 0.4rem 0;
+        vertical-align: top;
+      }
+      .asset-name {
+        display: flex;
+        align-items: center;
+        .asset-icon {
+          width: 20px;
+          height: 20px;
+          background-size: contain;
+          background-repeat: no-repeat;
+          margin-right: 0.4rem;
+        }
+      }
+      .asset-price {
+        font-size: 0.75rem;
+        color: #9ca3af;
+        margin-left: 1.8rem;
+      }
+      .subtext {
+        font-size: 0.75rem;
+        color: #9ca3af;
+      }
+    }
+  }
+}

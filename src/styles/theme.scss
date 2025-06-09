@@ -1,0 +1,45 @@
+@import "variables";
+
+body {
+  background-color: $bg-color;
+  color: $text-color;
+  font-family: $font-family;
+  margin: 0;
+}
+
+.navbar {
+  background-color: $bg-color;
+  padding: 1rem;
+  display: flex;
+  justify-content: space-between;
+  .nav-links {
+    a {
+      color: $accent-color;
+      text-decoration: none;
+      margin-right: 1rem;
+      &:hover {
+        text-shadow: 0 0 5px $accent-color;
+      }
+    }
+  }
+}
+
+.page {
+  padding: 2rem;
+  h1 {
+    text-shadow: 0 0 8px $text-color, 0 0 15px $text-color;
+  }
+}
+
+button {
+  background-color: darken($bg-color, 5%);
+  color: $accent-color;
+  border: 1px solid $accent-color;
+  padding: 0.5rem 1rem;
+  margin-right: 1rem;
+  box-shadow: 0 0 8px $accent-color;
+  cursor: pointer;
+  &:hover {
+    box-shadow: 0 0 12px $accent-color, 0 0 20px $accent-color;
+  }
+}

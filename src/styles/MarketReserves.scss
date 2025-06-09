@@ -1,0 +1,184 @@
+// src/styles/MarketReserves.scss
+
+.market-reserves {
+  margin-bottom: 2rem;
+
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+
+    h2 {
+      margin: 0;
+    }
+
+    .refresh-button {
+      padding: 0.5rem 1rem;
+      background-color: #f0f0f0;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      cursor: pointer;
+
+      &:hover {
+        background-color: #e0e0e0;
+      }
+    }
+  }
+
+  .market-summary {
+    display: flex;
+    margin-bottom: 1.5rem;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 1rem;
+
+    .summary-item {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+
+      .label {
+        font-size: 0.9rem;
+        color: #666;
+      }
+
+      .value {
+        font-size: 1.2rem;
+        font-weight: bold;
+      }
+    }
+  }
+
+  .reserves-table-container {
+    overflow-x: auto;
+  }
+
+  .reserves-table {
+    width: 100%;
+    border-collapse: collapse;
+
+    th,
+    td {
+      padding: 0.75rem;
+      text-align: left;
+      border-bottom: 1px solid #eee;
+    }
+
+    th {
+      font-weight: 600;
+      color: #666;
+    }
+
+    tbody tr {
+      transition: background-color 0.2s;
+
+      &:hover {
+        background-color: #f9f9f9;
+      }
+    }
+
+    .asset-cell {
+      .asset-name {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+
+      .asset-icon {
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        background-color: #eee;
+        display: inline-block;
+        background-size: contain;
+        background-position: center;
+        background-repeat: no-repeat;
+      }
+    }
+  }
+
+  .loading-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 3rem 0;
+
+    .loading-spinner {
+      border: 3px solid #f3f3f3;
+      border-top: 3px solid #3498db;
+      border-radius: 50%;
+      width: 30px;
+      height: 30px;
+      animation: spin 1s linear infinite;
+      margin-bottom: 1rem;
+    }
+
+    @keyframes spin {
+      0% {
+        transform: rotate(0deg);
+      }
+      100% {
+        transform: rotate(360deg);
+      }
+    }
+  }
+
+  .loading-indicator {
+    font-size: 0.9rem;
+    color: #666;
+    text-align: center;
+    padding: 0.5rem;
+    background-color: #f7f7f7;
+    border-radius: 4px;
+  }
+
+  .error-banner {
+    margin-top: 1rem;
+    padding: 0.75rem;
+    color: #721c24;
+    background-color: #f8d7da;
+    border: 1px solid #f5c6cb;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+
+    .retry-button {
+      padding: 0.25rem 0.75rem;
+      margin-left: 1rem;
+      background-color: #dc3545;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+
+      &:hover {
+        background-color: #c82333;
+      }
+    }
+  }
+
+  &.error-card {
+    .error-message {
+      padding: 2rem;
+      color: #d32f2f;
+      text-align: center;
+      background-color: #ffebee;
+      border-radius: 4px;
+    }
+  }
+
+  .last-update-info {
+    margin-top: 1rem;
+    text-align: right;
+    font-size: 0.8rem;
+    color: #777;
+    font-style: italic;
+
+    .user-attribution {
+      margin-left: 0.5rem;
+      font-weight: bold;
+    }
+  }
+}

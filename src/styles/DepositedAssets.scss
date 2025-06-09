@@ -1,0 +1,68 @@
+.deposited-assets {
+  background: #111827;
+  color: #e5e7eb;
+  padding: 1rem;
+  border-radius: 6px;
+  margin-bottom: 1.5rem;
+  .card-header {
+    h2 {
+      color: #93c5fd;
+      margin: 0;
+    }
+  }
+  .assets-list {
+    .list-header {
+      display: flex;
+      justify-content: space-between;
+      padding: 0.5rem 0;
+      font-size: 0.85rem;
+      color: #9ca3af;
+      border-bottom: 1px solid #374151;
+      .col-asset {
+        flex: 1;
+      }
+      .col-deposits {
+        flex: 1;
+        text-align: right;
+      }
+    }
+    .asset-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.5rem 0;
+      border-bottom: 1px solid #1f2937;
+      .asset-info {
+        display: flex;
+        align-items: center;
+        flex: 1;
+        .asset-icon {
+          width: 20px;
+          height: 20px;
+          background-size: contain;
+          background-repeat: no-repeat;
+          margin-right: 0.5rem;
+        }
+        .asset-name {
+          font-weight: 600;
+        }
+      }
+      .asset-amount {
+        text-align: right;
+        flex: 1;
+        .amount {
+          font-weight: 600;
+        }
+        .amount-usd {
+          font-size: 0.85rem;
+          color: #9ca3af;
+        }
+      }
+    }
+    .no-assets {
+      padding: 0.5rem;
+      font-size: 0.9rem;
+      color: #9ca3af;
+    }
+  }
+}
