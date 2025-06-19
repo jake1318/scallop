@@ -1,32 +1,154 @@
 // src/components/BorrowingActionModal.tsx
-// Enhanced with advanced debugging tools and alternative borrow methods
-// Last updated: 2025-06-07 02:13:12 UTC by jake1318
+// Last Updated: 2025-06-19 01:48:29 UTC by jake1318
 
 import React, { useState, useEffect } from "react";
 import { useWallet } from "@suiet/wallet-kit";
-import { Transaction } from "@mysten/sui/transactions";
-import scallopLendingService from "../scallop/scallopLendingService";
-import scallopBackendService from "../scallop/scallopBackendService";
+import scallopService from "../scallop/ScallopService";
+import scallopBorrowService from "../scallop/ScallopBorrowService";
+import scallopRepayService from "../scallop/ScallopRepayService";
+import { getObligationId } from "../scallop/ScallopCollateralService";
+import { unlockObligation } from "../scallop/ScallopIncentiveService";
+import { scallop } from "../scallop/ScallopService";
 import "../styles/BorrowingActionModal.scss";
+
+// Components to match the screenshot
+const ObligationItem = ({
+  obligation,
+  onUseForBorrow,
+  onDepositCollateral,
+  onUnstake,
+  isUnlocking,
+}) => {
+  const {
+    obligationId,
+    collaterals,
+    borrows,
+    hasBorrowIncentiveStake,
+    hasBoostStake,
+  } = obligation;
+  const hasStake = hasBorrowIncentiveStake || hasBoostStake;
+
+  // Calculate total values
+  const totalCollateralUsd = collaterals.reduce((sum, c) => sum + c.usd, 0);
+  const totalBorrowsUsd = borrows.reduce((sum, b) => sum + b.usd, 0);
+
+  // Format display for collateral and borrows
+  const collateralDisplay =
+    collaterals.length > 0
+      ? collaterals
+          .map(
+            (c) =>
+              `${formatNumber(c.amount, 2)} ${c.symbol} ($${formatNumber(
+                c.usd
+              )})`
+          )
+          .join(", ")
+      : "No collateral";
+
+  const borrowsDisplay =
+    borrows.length > 0
+      ? borrows
+          .map(
+            (b) =>
+              `${formatNumber(b.amount, 2)} ${b.symbol} ($${formatNumber(
+                b.usd
+              )})`
+          )
+          .join(", ")
+      : "No borrows";
+
+  return (
+    <div className="obligation-card">
+      <div className="obligation-header">
+        <div className="obligation-id">
+          ID: {obligation.obligationId.slice(0, 8)}...
+          {obligation.obligationId.slice(-4)}
+          <span
+            className={`status-indicator ${hasStake ? "staked" : "unlocked"}`}
+          >
+            {hasStake ? "🟠 Staked" : "🟢 Unlocked"}
+          </span>
+        </div>
+      </div>
+
+      <div className="obligation-details">
+        <div className="collateral">
+          <div className="label">
+            Collateral (${formatNumber(totalCollateralUsd)})
+          </div>
+          <div className="value">{collateralDisplay}</div>
+        </div>
+
+        <div className="borrows">
+          <div className="label">
+            Borrows (${formatNumber(totalBorrowsUsd)})
+          </div>
+          <div className="value">{borrowsDisplay}</div>
+        </div>
+      </div>
+
+      <div className="obligation-actions">
+        <button
+          className="action-btn primary"
+          onClick={() => onUseForBorrow(obligation)}
+          disabled={hasStake}
+        >
+          Use for Borrow
+        </button>
+
+        <button
+          className="action-btn secondary"
+          onClick={() => onDepositCollateral(obligation)}
+        >
+          Deposit Collateral
+        </button>
+
+        {hasStake && (
+          <button
+            className="action-btn warning"
+            onClick={() => onUnstake(obligation)}
+            disabled={isUnlocking === obligation.obligationId}
+          >
+            {isUnlocking === obligation.obligationId
+              ? "Unstaking..."
+              : "Unstake"}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// Simple utility functions since imports aren't available
+const formatNumber = (num: number, decimals: number = 2): string => {
+  return num.toFixed(decimals).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+};
+
+const truncateAddress = (address: string): string => {
+  if (!address) return "";
+  return `${address.slice(0, 6)}...${address.slice(-4)}`;
+};
 
 // Constants for coin configuration
 const COINS = {
   SUI: {
     symbol: "SUI",
-    decimals: 9,
     name: "sui",
+    decimals: 9,
+    icon: "/icons/sui-icon.svg",
   },
   USDC: {
     symbol: "USDC",
-    decimals: 6,
     name: "usdc",
+    decimals: 6,
+    icon: "/icons/usdc-icon.svg",
   },
 };
 
-// Minimum borrow amounts for reliable transactions
-const MIN_BORROW_AMOUNTS = {
-  USDC: 3, // Recommended minimum for USDC
-  SUI: 2, // Recommended minimum for SUI
+// Safe amounts for borrowing
+const SAFE_AMOUNTS = {
+  borrow: { USDC: 0.1, SUI: 0.01 },
+  repay: { USDC: 0.1, SUI: 0.1 },
 };
 
 interface BorrowingActionModalProps {
@@ -34,546 +156,104 @@ interface BorrowingActionModalProps {
   onSuccess?: () => void;
   defaultBorrowAmount?: string;
   hasObligation?: boolean;
+  mode?: "borrow" | "repay";
+  obligationId: string; // Required obligationId prop
 }
 
-const BorrowingActionModal: React.FC<BorrowingActionModalProps> = ({
-  onClose,
-  onSuccess,
-  defaultBorrowAmount = "",
-  hasObligation = false,
-}) => {
-  // Get wallet from Suiet context
-  const wallet = useWallet();
+interface Obligation {
+  obligationId: string;
+  collaterals: Array<{ symbol: string; amount: number; usd: number }>;
+  borrows: Array<{ symbol: string; amount: number; usd: number }>;
+  lockType: "boost" | "borrow-incentive" | null;
+  lockEnds: number | null;
+  hasBorrowIncentiveStake?: boolean;
+  hasBoostStake?: boolean;
+  isLocked?: boolean;
+  isEmpty?: boolean;
+  totalCollateralUSD?: number;
+  totalBorrowUSD?: number;
+  riskLevel?: number;
+}
 
-  // Form state
-  const [borrowAmount, setBorrowAmount] = useState<string>(defaultBorrowAmount);
-  const [borrowAsset, setBorrowAsset] = useState<keyof typeof COINS>("USDC");
+interface DepositModalProps {
+  obligationId: string;
+  onClose(): void;
+  refresh(): void;
+}
+
+// Deposit Collateral Modal Component
+const DepositModal: React.FC<DepositModalProps> = ({
+  obligationId,
+  onClose,
+  refresh,
+}) => {
+  const [amount, setAmount] = useState<string>("");
+  const [coin, setCoin] = useState<string>("sui");
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [txLink, setTxLink] = useState<string | null>(null);
-  const [showSuccess, setShowSuccess] = useState<boolean>(false);
-  const [suggestedAmount, setSuggestedAmount] = useState<number | null>(null);
-  const [maxSafeBorrowAmount, setMaxSafeBorrowAmount] = useState<number | null>(
-    null
-  );
-  const [processingStep, setProcessingStep] = useState<string | null>(null);
-  const [solutions, setSolutions] = useState<string[] | null>(null);
+  const [depositResult, setDepositResult] = useState<any>(null);
+  const wallet = useWallet();
 
-  // Asset price
-  const [assetPrice, setAssetPrice] = useState<number | null>(null);
-  const [usdValue, setUsdValue] = useState<string | null>(null);
-  const [isLoadingPrice, setIsLoadingPrice] = useState<boolean>(false);
-
-  // For debugging display
-  const [obligationId, setObligationId] = useState<string | null>(null);
-  const [sdkInfo, setSdkInfo] = useState<any>(null);
-  const [debugInfo, setDebugInfo] = useState<any>(null);
-  const [onChainMinimum, setOnChainMinimum] = useState<number | null>(null);
-  const [borrowMethod, setBorrowMethod] = useState<string>("regular");
-
-  // Load obligation ID and SDK info when component mounts
-  useEffect(() => {
-    if (wallet.connected) {
-      // Get obligation ID
-      scallopBackendService
-        .getObligationId(wallet)
-        .then((id) => setObligationId(id));
-
-      // Get basic SDK info
-      try {
-        const info = scallopLendingService.getSdkInfo();
-        setSdkInfo(info);
-      } catch (err) {
-        console.error("Error getting SDK info:", err);
-      }
-
-      // Check max safe borrow amount
-      checkMaxSafeBorrowAmount();
-
-      // Check on-chain minimum
-      checkOnChainMinimum();
-    }
-  }, [wallet.connected]);
-
-  // Update values when borrowAsset changes
-  useEffect(() => {
-    if (wallet.connected) {
-      checkMaxSafeBorrowAmount();
-      checkOnChainMinimum();
+  const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    if (value === "" || /^[0-9]*\.?[0-9]*$/.test(value)) {
+      setAmount(value);
       setError(null);
-      setSuggestedAmount(null);
-    }
-  }, [borrowAsset]);
-
-  // Check on-chain minimum borrow amount
-  const checkOnChainMinimum = async () => {
-    if (!wallet.address) return;
-
-    try {
-      const result = await scallopBackendService.checkDirectMinBorrow(
-        COINS[borrowAsset].name
-      );
-
-      if (result.success && result.recommendedMinimum) {
-        const chainMin = result.recommendedMinimum.displayAmount;
-        console.log(
-          `On-chain minimum borrow amount: ${chainMin} ${COINS[borrowAsset].symbol}`
-        );
-        setOnChainMinimum(chainMin);
-
-        // Update our display min if on-chain min is higher
-        if (chainMin > MIN_BORROW_AMOUNTS[borrowAsset]) {
-          console.log(
-            `Updating displayed minimum from ${MIN_BORROW_AMOUNTS[borrowAsset]} to ${chainMin}`
-          );
-        }
-      }
-    } catch (err) {
-      console.warn("Error checking on-chain minimum:", err);
     }
   };
 
-  // Get max safe borrow amount
-  const checkMaxSafeBorrowAmount = async () => {
-    if (!wallet.address) return;
-
-    try {
-      const result = await scallopBackendService.getMaxBorrowAmount(
-        wallet.address,
-        COINS[borrowAsset].name
-      );
-
-      if (result.success && result.maxAmount > 0) {
-        console.log(
-          `Maximum safe borrow amount: ${result.maxAmount} ${COINS[borrowAsset].symbol}`
-        );
-        setMaxSafeBorrowAmount(result.maxAmount);
-
-        // Check if current amount exceeds safe maximum
-        if (borrowAmount && Number(borrowAmount) > result.maxAmount) {
-          setError(
-            `Warning: Your requested amount exceeds the safe maximum of ${result.maxAmount} ${COINS[borrowAsset].symbol}.`
-          );
-        }
-      }
-    } catch (err) {
-      console.warn("Error checking max borrow amount:", err);
-    }
-  };
-
-  // Get market price data
-  useEffect(() => {
-    const fetchPrice = async () => {
-      if (!borrowAsset) return;
-
-      setIsLoadingPrice(true);
-      try {
-        const prices = await scallopBackendService.getMarketPrices();
-        const assetName = COINS[borrowAsset].name;
-
-        if (prices.pools && prices.pools[assetName]?.coinPrice) {
-          setAssetPrice(prices.pools[assetName].coinPrice);
-
-          // Calculate USD value if amount is provided
-          if (borrowAmount && !isNaN(Number(borrowAmount))) {
-            const amountNum = Number(borrowAmount);
-            setUsdValue(
-              (amountNum * prices.pools[assetName].coinPrice).toFixed(2)
-            );
-          }
-        }
-      } catch (error) {
-        console.error("Failed to fetch market data:", error);
-      } finally {
-        setIsLoadingPrice(false);
-      }
-    };
-
-    fetchPrice();
-  }, [borrowAsset, borrowAmount]);
-
-  // Debug the borrow_internal function
-  const debugBorrowInternal = async () => {
-    try {
-      setIsLoading(true);
-      setProcessingStep("Deep debugging borrow_internal function...");
-
-      const response = await fetch("/api/debug/borrow-internal", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sender: wallet.address,
-          coin: COINS[borrowAsset].name,
-          obligationId,
-        }),
-      });
-
-      const data = await response.json();
-      setDebugInfo((prev) => ({
-        ...prev,
-        borrowInternalDebug: data,
-        timestamp: new Date().toISOString(),
-      }));
-
-      setError(
-        `Deep debugging completed. Check server console for detailed analysis.`
-      );
-    } catch (error) {
-      console.error("Error debugging borrow_internal:", error);
-      setError(`Error during debugging: ${error.message}`);
-    } finally {
-      setIsLoading(false);
-      setProcessingStep(null);
-    }
-  };
-
-  // Analyze transaction structure
-  const analyzeTransactionStructure = async () => {
-    try {
-      setIsLoading(true);
-      setProcessingStep("Analyzing transaction structure...");
-
-      const response = await fetch("/api/analyze-transaction-structure", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sender: wallet.address,
-        }),
-      });
-
-      const data = await response.json();
-      setDebugInfo((prev) => ({
-        ...prev,
-        transactionAnalysis: data,
-        timestamp: new Date().toISOString(),
-      }));
-
-      setError(`Transaction structure analysis completed. Check server logs.`);
-    } catch (error) {
-      console.error("Error analyzing transaction structure:", error);
-      setError(`Error during analysis: ${error.message}`);
-    } finally {
-      setIsLoading(false);
-      setProcessingStep(null);
-    }
-  };
-
-  // Try direct borrow without price updates
-  const tryDirectBorrow = async () => {
-    if (!wallet.connected) {
-      setError("Wallet not connected");
-      return;
-    }
-
-    const borrowAmtNum = Number(borrowAmount);
-    if (isNaN(borrowAmtNum) || borrowAmtNum <= 0) {
-      setError("Please enter a valid borrow amount");
+  async function handleDeposit() {
+    const amt = Number(amount);
+    if (amt <= 0) {
+      setError("Please enter a valid amount");
       return;
     }
 
     setIsLoading(true);
     setError(null);
-    setTxLink(null);
-    setSolutions(null);
-    setProcessingStep("Creating direct borrow transaction...");
 
     try {
-      const directResponse = await fetch("/api/direct-borrow", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sender: wallet.address,
-          coin: COINS[borrowAsset].name,
-          amount: borrowAmtNum,
-          decimals: COINS[borrowAsset].decimals,
-          obligationId,
-        }),
-      });
-
-      const directData = await directResponse.json();
-
-      if (!directData.success) {
-        setError(
-          `Failed to create direct borrow transaction: ${directData.error}`
-        );
-        return;
-      }
-
-      // Execute the transaction
-      setProcessingStep("Executing direct borrow transaction...");
-      const txb = Transaction.from(directData.serializedTx);
-      const txResult = await wallet.signAndExecuteTransactionBlock({
-        transactionBlock: txb,
-        options: { showEffects: true, showEvents: true },
-      });
-
-      if (txResult.effects?.status?.status === "success") {
-        setTxLink(`https://suivision.xyz/txblock/${txResult.digest}`);
-        setShowSuccess(true);
-
-        if (onSuccess) {
-          onSuccess();
-        }
-      } else {
-        const errorText = String(txResult.effects?.status?.error || "");
-        setError(`Direct borrow transaction failed: ${errorText}`);
-
-        // Log detailed error info
-        setDebugInfo((prev) => ({
-          ...prev,
-          directBorrowError: errorText,
-          txDigest: txResult.digest,
-          timestamp: new Date().toISOString(),
-        }));
-
-        setSolutions([
-          "Try a different borrow method",
-          "Add more collateral to your lending account",
-          "Contact Scallop support for assistance",
-        ]);
-      }
-    } catch (error) {
-      console.error("Error with direct borrow:", error);
-      setError(`Error: ${error.message}`);
-    } finally {
-      setIsLoading(false);
-      setProcessingStep(null);
-    }
-  };
-
-  // Try large borrow test
-  const tryLargeBorrowTest = async () => {
-    if (!wallet.connected) return;
-
-    setIsLoading(true);
-    setProcessingStep("Testing with larger amount...");
-    setError(null);
-    setTxLink(null);
-    setSolutions(null);
-
-    try {
-      const result = await scallopBackendService.borrowLarge(
+      const decimals = coin === "sui" ? 9 : 6;
+      // Using explicitly specified obligationId for deposit
+      const result = await scallopBorrowService.depositCollateral(
         wallet,
-        COINS[borrowAsset].name
+        obligationId,
+        coin as "usdc" | "sui" | "usdt",
+        amt,
+        decimals
       );
 
       if (result.success) {
-        setTxLink(result.txLink);
-        setShowSuccess(true);
+        setDepositResult({
+          success: true,
+          message: `Successfully deposited ${amt} ${coin.toUpperCase()} as collateral`,
+          txHash: result.digest,
+          txLink: result.txLink,
+        });
 
-        // Add note about using large amount
-        setDebugInfo((prev) => ({
-          ...prev,
-          largeAmountSuccess: true,
-          amount: result.amount,
-          timestamp: new Date().toISOString(),
-        }));
-
-        // Call success callback if provided
-        if (onSuccess) {
-          onSuccess();
-        }
+        // Refresh data after success, but don't close modal yet
+        // so the user can see the transaction result
+        refresh();
       } else {
-        setError(`Large amount test failed: ${result.error}`);
+        setError(result.error || "Failed to deposit collateral");
       }
-    } catch (error: any) {
-      console.error("Large borrow test failed:", error);
-      setError(error.message || "Test failed. Please try another approach.");
+    } catch (err) {
+      console.error("[Deposit] Error depositing collateral:", err);
+      setError(
+        err instanceof Error ? err.message : "Failed to deposit collateral"
+      );
     } finally {
       setIsLoading(false);
-      setProcessingStep(null);
     }
-  };
-
-  // Regular borrow with SDK
-  const handleRegularBorrow = async () => {
-    if (!wallet.connected) {
-      setError("Wallet not connected");
-      return;
-    }
-
-    // Validate input values
-    const borrowAmtNum = Number(borrowAmount);
-
-    if (isNaN(borrowAmtNum) || borrowAmtNum <= 0) {
-      setError("Please enter a valid borrow amount.");
-      return;
-    }
-
-    // Check minimum borrow amount
-    const minAmount = MIN_BORROW_AMOUNTS[borrowAsset];
-    if (borrowAmtNum < minAmount) {
-      setError(
-        `Minimum borrow amount for ${COINS[borrowAsset].symbol} is ${minAmount}.`
-      );
-      return;
-    }
-
-    // Also check on-chain minimum if we have it
-    if (onChainMinimum && borrowAmtNum < onChainMinimum) {
-      setError(
-        `On-chain minimum borrow amount is ${onChainMinimum} ${COINS[borrowAsset].symbol}.`
-      );
-      return;
-    }
-
-    setIsLoading(true);
-    setError(null);
-    setTxLink(null);
-    setSolutions(null);
-    setProcessingStep("Creating borrow transaction");
-
-    try {
-      // Get selected coin
-      const selectedCoin = COINS[borrowAsset];
-
-      // Execute the borrow
-      console.log(`Starting borrow process using backend service`);
-
-      const result = await scallopBackendService.borrow(
-        wallet,
-        selectedCoin.name,
-        borrowAmtNum,
-        selectedCoin.decimals
-      );
-
-      if (result.success) {
-        // Set transaction link for UI
-        setTxLink(result.txLink);
-        setShowSuccess(true);
-
-        // Call success callback if provided
-        if (onSuccess) {
-          onSuccess();
-        }
-      } else {
-        // Check if there's a suggested amount or specific error code
-        if (result.errorCode === "1281") {
-          setError(
-            `Transaction failed with error 1281: Minimum borrow amount not met. Please try borrowing at least ${
-              onChainMinimum || minAmount
-            } ${COINS[borrowAsset].symbol}.`
-          );
-          setSuggestedAmount(onChainMinimum || minAmount);
-          setSolutions([
-            `Try one of the alternative borrow methods below`,
-            `Borrow at least ${onChainMinimum || minAmount} ${
-              COINS[borrowAsset].symbol
-            }`,
-            "Add more collateral to your lending account",
-            "Wait a few minutes and try again (price feeds may need to update)",
-          ]);
-        } else if (result.suggestedAmount) {
-          // Show suggested amount
-          setError(result.error || "Transaction failed. Try suggested amount.");
-          setSuggestedAmount(Math.max(minAmount, result.suggestedAmount));
-        } else if (result.minimumAmount) {
-          // Minimum amount required
-          setError(
-            `${
-              result.error || "Transaction failed."
-            } The minimum borrow amount is ${result.minimumAmount} ${
-              COINS[borrowAsset].symbol
-            }.`
-          );
-          setSuggestedAmount(result.minimumAmount);
-        } else {
-          // Regular error
-          setError(result.error || "Transaction failed. Please try again.");
-
-          // Add solutions if provided
-          if (result.solutions) {
-            setSolutions(result.solutions);
-          } else {
-            setSolutions([
-              `Make sure you're borrowing at least ${
-                onChainMinimum || minAmount
-              } ${COINS[borrowAsset].symbol}`,
-              "Try one of the alternative borrow methods below",
-              "Add more collateral to your lending account",
-              "Try again in a few minutes when price feeds update",
-            ]);
-          }
-        }
-      }
-    } catch (err: any) {
-      console.error("Borrow transaction failed:", err);
-      setError(err.message || "Borrow failed. Please try again.");
-    } finally {
-      setIsLoading(false);
-      setProcessingStep(null);
-    }
-  };
-
-  // Handle borrow based on selected method
-  const handleBorrow = async () => {
-    switch (borrowMethod) {
-      case "direct":
-        await tryDirectBorrow();
-        break;
-      case "large":
-        await tryLargeBorrowTest();
-        break;
-      case "regular":
-      default:
-        await handleRegularBorrow();
-        break;
-    }
-  };
-
-  // Update USD value when amount changes
-  const handleAmountChange = (value: string) => {
-    setBorrowAmount(value);
-
-    // Clear suggested amount when user changes the amount
-    if (suggestedAmount !== null) {
-      setSuggestedAmount(null);
-    }
-
-    // Check minimum borrow amount - show warnings but don't block UI
-    const minAmount = MIN_BORROW_AMOUNTS[borrowAsset];
-    const effectiveMin =
-      onChainMinimum && onChainMinimum > minAmount ? onChainMinimum : minAmount;
-    const amountNum = Number(value);
-
-    if (!isNaN(amountNum) && amountNum > 0 && amountNum < effectiveMin) {
-      setError(
-        `Minimum borrow amount for ${COINS[borrowAsset].symbol} is ${effectiveMin}.`
-      );
-    } else if (
-      maxSafeBorrowAmount !== null &&
-      amountNum > maxSafeBorrowAmount
-    ) {
-      setError(
-        `Warning: Your requested amount exceeds the safe maximum of ${maxSafeBorrowAmount} ${COINS[borrowAsset].symbol}.`
-      );
-    } else {
-      setError(null);
-    }
-
-    // Update USD value
-    if (assetPrice && !isNaN(amountNum)) {
-      setUsdValue((amountNum * assetPrice).toFixed(2));
-    } else {
-      setUsdValue(null);
-    }
-  };
-
-  // Use suggested amount handler
-  const handleUseSuggestedAmount = () => {
-    if (suggestedAmount !== null) {
-      setBorrowAmount(suggestedAmount.toString());
-      setError(null);
-    }
-  };
+  }
 
   return (
     <div className="modal-overlay">
-      <div className="modal-container">
+      <div className="modal-container deposit-modal">
         <div className="modal-header">
-          <h2>Borrow Assets</h2>
+          <h2>Deposit Collateral</h2>
           <button className="close-btn" onClick={onClose}>
-            &times;
+            ×
           </button>
         </div>
 
@@ -581,259 +261,1224 @@ const BorrowingActionModal: React.FC<BorrowingActionModalProps> = ({
           {isLoading ? (
             <div className="loading-container">
               <span className="loader"></span>
-              <p>Processing your transaction...</p>
-              {processingStep && (
-                <p className="processing-step">{processingStep}</p>
-              )}
+              <p>Depositing collateral...</p>
               <p className="small-text">
-                This may take a moment while we prepare your transaction.
+                This may take a moment while we process your transaction.
               </p>
             </div>
-          ) : showSuccess ? (
-            <div className="result-container success">
-              <h3>Transaction Successful!</h3>
-              <p>
-                You've successfully borrowed {borrowAmount}{" "}
-                {COINS[borrowAsset].symbol}.
-              </p>
+          ) : depositResult ? (
+            <div
+              className={`result-container ${
+                depositResult.success ? "success" : "error"
+              }`}
+            >
+              <h3>Transaction Successful</h3>
+              <p>{depositResult.message}</p>
 
-              {txLink && (
-                <div className="tx-details">
-                  <div className="tx-hash">Transaction completed</div>
+              <div className="tx-details">
+                <p>
+                  Transaction Hash:{" "}
+                  <span className="tx-hash">
+                    {depositResult.txHash.slice(0, 10)}...
+                    {depositResult.txHash.slice(-8)}
+                  </span>
+                </p>
+                {depositResult.txLink && (
                   <a
-                    href={txLink}
+                    href={depositResult.txLink}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="tx-link"
                   >
-                    View on SuiVision
+                    View Transaction
                   </a>
-                </div>
-              )}
-
-              <div className="action-buttons">
-                <button className="primary-btn" onClick={onClose}>
-                  Close
-                </button>
+                )}
               </div>
+
+              <button
+                className="primary-btn"
+                onClick={onClose}
+                style={{ marginTop: "15px" }}
+              >
+                Close
+              </button>
             </div>
           ) : (
             <>
-              <div className="asset-selection">
-                <label>Select Asset:</label>
-                <div className="asset-buttons">
-                  {Object.keys(COINS).map((coin) => (
-                    <button
-                      key={coin}
-                      className={`asset-btn ${
-                        borrowAsset === coin ? "selected" : ""
+              <p className="obligation-info">
+                Adding collateral to obligation: {obligationId.slice(0, 6)}...
+                {obligationId.slice(-4)}
+              </p>
+
+              <div className="asset-selector">
+                <h3>Select Asset</h3>
+                <div className="asset-options">
+                  {Object.entries(COINS).map(([symbol, data]) => (
+                    <div
+                      key={`deposit-asset-${symbol}`}
+                      className={`asset-option ${
+                        coin === data.name ? "selected" : ""
                       }`}
-                      onClick={() => setBorrowAsset(coin as keyof typeof COINS)}
+                      onClick={() => setCoin(data.name)}
                     >
-                      {coin}
-                    </button>
+                      <img
+                        src={data.icon}
+                        alt={symbol}
+                        className="asset-icon"
+                      />
+                      <span>{symbol}</span>
+                    </div>
                   ))}
                 </div>
               </div>
 
-              <div className="asset-info">
-                <div className="info-row">
-                  <span>Asset to Borrow:</span>
-                  <span>{COINS[borrowAsset].symbol}</span>
-                </div>
-                <div className="info-row">
-                  <span>Decimals:</span>
-                  <span>{COINS[borrowAsset].decimals}</span>
-                </div>
-                <div className="info-row">
-                  <span>Current Price:</span>
-                  <span>
-                    {assetPrice
-                      ? `$${assetPrice.toFixed(2)}`
-                      : isLoadingPrice
-                      ? "Loading..."
-                      : "N/A"}
-                  </span>
-                </div>
-                {obligationId && (
-                  <div className="info-row">
-                    <span>Obligation ID:</span>
-                    <span className="obligation-id">
-                      {obligationId.substring(0, 10)}...
-                      {obligationId.substring(obligationId.length - 10)}
-                    </span>
-                  </div>
-                )}
-
-                {maxSafeBorrowAmount !== null && (
-                  <div className="info-row safe-borrow">
-                    <span>Safe Borrow Amount:</span>
-                    <span className="max-safe">
-                      Up to {maxSafeBorrowAmount} {COINS[borrowAsset].symbol}
-                    </span>
-                  </div>
-                )}
-
-                <div className="info-row">
-                  <span>Minimum Amount:</span>
-                  <span className="min-amount">
-                    {onChainMinimum &&
-                    onChainMinimum > MIN_BORROW_AMOUNTS[borrowAsset]
-                      ? `${onChainMinimum} ${COINS[borrowAsset].symbol} (on-chain)`
-                      : `${MIN_BORROW_AMOUNTS[borrowAsset]} ${COINS[borrowAsset].symbol}`}
-                  </span>
-                </div>
-
-                <div className="info-row">
-                  <span>Borrow Method:</span>
-                  <span className="borrow-method">
-                    <select
-                      value={borrowMethod}
-                      onChange={(e) => setBorrowMethod(e.target.value)}
-                    >
-                      <option value="regular">
-                        Regular (With Price Update)
-                      </option>
-                      <option value="direct">Direct (No Price Update)</option>
-                      <option value="large">Large Amount Test</option>
-                    </select>
-                  </span>
-                </div>
-              </div>
-
               <div className="amount-input-container">
-                <label>Amount to Borrow</label>
-                <div className="min-amount-note">
-                  Minimum:{" "}
-                  {onChainMinimum &&
-                  onChainMinimum > MIN_BORROW_AMOUNTS[borrowAsset]
-                    ? onChainMinimum
-                    : MIN_BORROW_AMOUNTS[borrowAsset]}{" "}
-                  {COINS[borrowAsset].symbol}
-                </div>
-                <div className="input-with-max">
-                  <input
-                    type="number"
-                    value={borrowAmount}
-                    onChange={(e) => handleAmountChange(e.target.value)}
-                    placeholder={`Enter amount of ${COINS[borrowAsset].symbol}`}
-                    disabled={isLoading}
-                    min={MIN_BORROW_AMOUNTS[borrowAsset]}
-                    step="0.1"
-                  />
-                  {maxSafeBorrowAmount !== null && (
-                    <button
-                      className="max-btn"
-                      onClick={() =>
-                        handleAmountChange(maxSafeBorrowAmount.toString())
-                      }
-                    >
-                      MAX SAFE
-                    </button>
-                  )}
-                </div>
-                {usdValue && (
-                  <div className="amount-in-usd">≈ ${usdValue} USD</div>
-                )}
+                <label htmlFor="deposit-amount">Amount to Deposit</label>
+                <input
+                  type="text"
+                  id="deposit-amount"
+                  value={amount}
+                  onChange={handleAmountChange}
+                  placeholder="0.00"
+                  disabled={isLoading}
+                />
               </div>
 
               {error && <div className="error-message">{error}</div>}
 
-              {solutions && (
-                <div className="solutions-container">
-                  <h4>Suggested solutions:</h4>
-                  <ul className="solutions-list">
-                    {solutions.map((solution, index) => (
-                      <li key={index}>{solution}</li>
-                    ))}
-                  </ul>
+              <div className="action-buttons">
+                <button
+                  className="secondary-btn"
+                  onClick={onClose}
+                  disabled={isLoading}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="primary-btn"
+                  onClick={handleDeposit}
+                  disabled={isLoading || !amount || parseFloat(amount) <= 0}
+                >
+                  {isLoading ? "Depositing..." : "Deposit"}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const BorrowingActionModal: React.FC<BorrowingActionModalProps> = ({
+  onClose,
+  onSuccess,
+  defaultBorrowAmount = "",
+  hasObligation = false,
+  mode = "borrow",
+  obligationId, // Use the passed obligationId
+}) => {
+  const wallet = useWallet();
+
+  // State
+  const [actionAmount, setActionAmount] = useState<string>(defaultBorrowAmount);
+  const [borrowAsset, setBorrowAsset] = useState<string>("USDC");
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [transactionResult, setTransactionResult] = useState<any>(null);
+  const [healthFactor, setHealthFactor] = useState<number | null>(null);
+  const [userCollateral, setUserCollateral] = useState<any[]>([]);
+  const [isInitialLoading, setIsInitialLoading] = useState<boolean>(true);
+  const [userObligations, setUserObligations] = useState<Obligation[]>([]);
+  const [showObligations, setShowObligations] = useState<boolean>(false);
+  const [showDepositModal, setShowDepositModal] = useState<boolean>(false);
+  const [depositObligationId, setDepositObligationId] = useState<string | null>(
+    null
+  );
+  const [selectedObl, setSelectedObl] = useState<Obligation | null>(null);
+  const [unlockingObligationId, setUnlockingObligationId] = useState<
+    string | null
+  >(null);
+  const [unlockResult, setUnlockResult] = useState<any>(null);
+  const [isCreatingObligation, setIsCreatingObligation] =
+    useState<boolean>(false);
+  const [currentView, setCurrentView] = useState<"borrowing" | "obligations">(
+    "borrowing"
+  );
+
+  // NEW: State to track the external obligationId prop
+  const [currentObligationId, setCurrentObligationId] =
+    useState<string>(obligationId);
+
+  // NEW: State for max borrow in both USD and tokens
+  const [maxBorrowUsd, setMaxBorrowUsd] = useState<number>(0);
+  const [maxBorrowTokens, setMaxBorrowTokens] = useState<number>(0);
+
+  // NEW: Update currentObligationId when props change
+  useEffect(() => {
+    setCurrentObligationId(obligationId);
+  }, [obligationId]);
+
+  // Helper function to check if an obligation has collateral
+  const hasCollateral = (
+    obligation: Obligation | null | undefined
+  ): boolean => {
+    if (!obligation) return false;
+
+    // Check if the obligation has collateral with value
+    return obligation.collaterals.some((c) => c.amount > 0 && c.usd > 0);
+  };
+
+  // Get total collateral value from an obligation
+  const getTotalCollateralValue = (
+    obligation: Obligation | null | undefined
+  ): number => {
+    if (!obligation) return 0;
+    return obligation.totalCollateralUSD || 0;
+  };
+
+  // Calculate maximum safe borrow amount based on collateral
+  const calculateSafeBorrowAmount = (
+    obligation: Obligation | null | undefined,
+    assetPrice: number = 1
+  ): { usd: number; tokens: number } => {
+    if (!obligation) return { usd: 0, tokens: 0 };
+
+    // A conservative health factor - can be adjusted (70% of collateral)
+    const healthFactor = 0.7;
+
+    // Calculate max borrow in USD
+    const maxBorrowUsd = (obligation.totalCollateralUSD || 0) * healthFactor;
+
+    // Convert USD amount to token amount
+    const safeAmount = assetPrice > 0 ? maxBorrowUsd / assetPrice : 0;
+
+    console.log(
+      `Calculated max borrow amount: $${maxBorrowUsd.toFixed(
+        2
+      )} USD (${safeAmount.toFixed(6)} ${borrowAsset})`
+    );
+
+    return {
+      usd: maxBorrowUsd,
+      tokens: safeAmount,
+    };
+  };
+
+  // Fetch user portfolio data when component mounts
+  useEffect(() => {
+    if (wallet.connected && wallet.address) {
+      setIsInitialLoading(true);
+      Promise.all([fetchUserObligations(), fetchUserPortfolioData()]).finally(
+        () => {
+          setIsInitialLoading(false);
+        }
+      );
+    }
+  }, [wallet.connected, wallet.address, borrowAsset]);
+
+  // Check if the current obligation matches one from our list
+  useEffect(() => {
+    if (currentObligationId && userObligations.length > 0) {
+      // Find the obligation in the list that matches our external ID
+      const foundObligation = userObligations.find(
+        (o) => o.obligationId === currentObligationId
+      );
+
+      if (foundObligation) {
+        // Update the selected obligation to reflect current state
+        setSelectedObl(foundObligation);
+
+        // Get the asset price
+        const assetPrice =
+          borrowAsset === "USDC" ? 1 : borrowAsset === "SUI" ? 3.0 : 1;
+
+        // Calculate max borrow amounts
+        if (foundObligation.collaterals.length > 0) {
+          const safeAmountData = calculateSafeBorrowAmount(
+            foundObligation,
+            assetPrice
+          );
+          setMaxBorrowUsd(safeAmountData.usd);
+          setMaxBorrowTokens(safeAmountData.tokens);
+
+          console.log(
+            `Setting max borrow: $${safeAmountData.usd.toFixed(
+              2
+            )} (${safeAmountData.tokens.toFixed(6)} ${borrowAsset})`
+          );
+        } else {
+          setMaxBorrowUsd(0);
+          setMaxBorrowTokens(0);
+        }
+      }
+    }
+  }, [userObligations, currentObligationId, borrowAsset]);
+
+  // Fetch user obligations
+  const fetchUserObligations = async () => {
+    try {
+      if (!wallet.address) return;
+
+      const obligations = await scallopBorrowService.getUserObligations(
+        wallet.address
+      );
+      setUserObligations(obligations);
+
+      console.log(
+        "%c[BorrowingActionModal] userObligations set to:",
+        "color:#ffb300;font-weight:bold",
+        JSON.parse(JSON.stringify(obligations))
+      );
+
+      // Find the obligation that matches our current ID
+      const matchingObligation = obligations.find(
+        (o) => o.obligationId === currentObligationId
+      );
+
+      if (matchingObligation) {
+        setSelectedObl(matchingObligation);
+      }
+    } catch (err) {
+      console.error("Error fetching obligations:", err);
+    }
+  };
+
+  // Fetch user portfolio data to calculate max borrow amount and current debt
+  const fetchUserPortfolioData = async () => {
+    try {
+      if (!wallet.address) return;
+
+      const userPositions = await scallopService.fetchUserPositions(
+        wallet.address
+      );
+      console.log("User positions:", userPositions);
+
+      // Store collateral assets
+      setUserCollateral(userPositions.collateralAssets || []);
+
+      // Calculate total collateral value in USD
+      const totalCollateralUSD = userPositions.collateralAssets.reduce(
+        (sum, asset) => sum + asset.valueUSD,
+        0
+      );
+
+      // Calculate total borrowed value in USD
+      const totalBorrowedUSD = userPositions.borrowedAssets.reduce(
+        (sum, asset) => sum + asset.valueUSD,
+        0
+      );
+
+      // Calculate health factor (simplified)
+      let calculatedHealthFactor =
+        totalBorrowedUSD > 0
+          ? (totalCollateralUSD * 0.8) / totalBorrowedUSD
+          : 999;
+
+      // Cap at 999 for display purposes
+      calculatedHealthFactor = Math.min(calculatedHealthFactor, 999);
+      setHealthFactor(calculatedHealthFactor);
+    } catch (err) {
+      console.error("Error fetching portfolio data:", err);
+    }
+  };
+
+  // Handle amount change
+  const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    if (value === "" || /^[0-9]*\.?[0-9]*$/.test(value)) {
+      setActionAmount(value);
+      setError(null);
+    }
+  };
+
+  // Handle asset selection
+  const handleAssetChange = (asset: string) => {
+    setBorrowAsset(asset);
+    setActionAmount("");
+
+    // Recalculate max borrow amount for the new asset
+    if (selectedObl) {
+      const assetPrice = asset === "USDC" ? 1 : asset === "SUI" ? 3.0 : 1;
+      const safeAmountData = calculateSafeBorrowAmount(selectedObl, assetPrice);
+      setMaxBorrowUsd(safeAmountData.usd);
+      setMaxBorrowTokens(safeAmountData.tokens);
+    }
+  };
+
+  // Use safe amount
+  const handleUseSafeAmount = () => {
+    // Use the pre-calculated max borrow tokens value
+    if (maxBorrowTokens > 0) {
+      // Apply a small safety margin to avoid rounding issues
+      const safeAmount = maxBorrowTokens * 0.98;
+      setActionAmount(safeAmount.toFixed(borrowAsset === "SUI" ? 4 : 2));
+    } else {
+      // Fallback to the static safe amounts
+      const safeAmount = SAFE_AMOUNTS[mode][borrowAsset];
+      setActionAmount(safeAmount.toString());
+    }
+  };
+
+  // Set maximum amount (for repay)
+  const handleUseMaxAmount = () => {
+    if (mode === "repay" && selectedObl) {
+      const borrowedAsset = selectedObl.borrows.find(
+        (b) => b.symbol === borrowAsset
+      );
+      if (borrowedAsset) {
+        setActionAmount(borrowedAsset.amount.toString());
+      }
+    }
+  };
+
+  // Check if obligation is locked
+  const isObligationLocked = () => {
+    if (!selectedObl) return false;
+    return selectedObl.hasBorrowIncentiveStake || selectedObl.hasBoostStake;
+  };
+
+  // Validate form before submission
+  const validateForm = (): boolean => {
+    if (!wallet.connected) {
+      setError("Please connect your wallet first");
+      return false;
+    }
+
+    if (!actionAmount || parseFloat(actionAmount) <= 0) {
+      setError(`Please enter a valid ${mode} amount`);
+      return false;
+    }
+
+    const amount = parseFloat(actionAmount);
+
+    if (mode === "borrow") {
+      // Check if the selected obligation has collateral
+      if (!selectedObl || !hasCollateral(selectedObl)) {
+        setError(
+          "This obligation has no collateral. Please add collateral first."
+        );
+        return false;
+      }
+
+      // Check if the obligation is locked
+      if (isObligationLocked()) {
+        setError("This obligation is locked. Please unstake it first.");
+        return false;
+      }
+
+      // Check against maximum borrow amount
+      if (maxBorrowTokens > 0 && amount > maxBorrowTokens) {
+        setError(
+          `Maximum safe borrow amount is ${formatNumber(
+            maxBorrowTokens,
+            4
+          )} ${borrowAsset} (≈ $${formatNumber(maxBorrowUsd, 2)})`
+        );
+        return false;
+      }
+
+      // Minimum borrow check
+      const minBorrowAmount = borrowAsset === "USDC" ? 0.01 : 0.01;
+      if (amount < minBorrowAmount) {
+        setError(`Minimum borrow amount is ${minBorrowAmount} ${borrowAsset}`);
+        return false;
+      }
+    }
+
+    if (mode === "repay") {
+      // Get the borrowed amount of this asset
+      if (selectedObl) {
+        const borrowedAsset = selectedObl.borrows.find(
+          (b) => b.symbol === borrowAsset
+        );
+        if (borrowedAsset && amount > borrowedAsset.amount) {
+          setError(
+            `You only have ${borrowedAsset.amount.toFixed(
+              6
+            )} ${borrowAsset} debt to repay`
+          );
+          return false;
+        }
+      }
+    }
+
+    return true;
+  };
+
+  // Handle unlock/unstaking of the obligation
+  const handleUnlockObligation = async () => {
+    if (!selectedObl) return;
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      // Use the unified unlockObligation function that detects the lock type
+      const result = await unlockObligation(
+        wallet,
+        currentObligationId,
+        selectedObl.lockType
+      );
+
+      if (result.success) {
+        setUnlockResult({
+          success: true,
+          message: `Successfully unlocked obligation ${currentObligationId.slice(
+            0,
+            6
+          )}...${currentObligationId.slice(-4)}`,
+          txHash: result.digest,
+          txLink: result.txLink,
+        });
+
+        // Refresh obligation data
+        fetchUserObligations();
+      } else {
+        setError(`Failed to unlock obligation: ${result.error}`);
+      }
+    } catch (err) {
+      console.error("Error unlocking obligation:", err);
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      setError(`Error unlocking obligation: ${errorMsg}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Handle adding collateral
+  const handleAddCollateral = () => {
+    if (selectedObl) {
+      openDepositModal(selectedObl);
+    }
+  };
+
+  // Handle form submission
+  const handleSubmit = async () => {
+    if (!validateForm() || !wallet.connected) {
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const amt = parseFloat(actionAmount);
+      const selectedCoin = COINS[borrowAsset];
+
+      let result;
+      if (mode === "borrow") {
+        // Always use the externally provided obligationId
+        result = await scallopBorrowService.borrowFromObligation(
+          wallet,
+          currentObligationId, // Use the current obligation ID from props
+          selectedCoin.name as "usdc" | "sui" | "usdt",
+          amt,
+          selectedCoin.decimals
+        );
+      } else {
+        // For repay, also use the obligationId if needed
+        result = await scallopRepayService.repay(
+          wallet,
+          selectedCoin.name as "usdc" | "sui" | "usdt",
+          amt,
+          selectedCoin.decimals,
+          currentObligationId // Pass obligation ID to repay service if it supports it
+        );
+      }
+
+      if (result.success) {
+        setTransactionResult({
+          success: true,
+          message: `Successfully ${
+            mode === "borrow" ? "borrowed" : "repaid"
+          } ${amt} ${borrowAsset}`,
+          txHash: result.digest,
+          txLink: result.txLink,
+        });
+
+        if (onSuccess) {
+          onSuccess();
+        }
+
+        setTimeout(() => {
+          fetchUserPortfolioData();
+          fetchUserObligations();
+        }, 2000);
+      } else {
+        setTransactionResult({
+          success: false,
+          message: `Failed to ${
+            mode === "borrow" ? "borrow" : "repay"
+          } ${amt} ${borrowAsset}`,
+          error: result.error,
+        });
+        setError(result.error || `Transaction failed`);
+      }
+    } catch (err: any) {
+      console.error(`Error in ${mode} transaction:`, err);
+      setTransactionResult({
+        success: false,
+        message: `Error ${
+          mode === "borrow" ? "borrowing" : "repaying"
+        } ${borrowAsset}`,
+        error: err.message || String(err),
+      });
+      setError(err.message || `An error occurred`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Render Obligations View with separate sections for empty and used obligations
+  const renderObligationsView = () => {
+    // Extract unused/empty obligations
+    const emptyObligations = userObligations.filter(
+      (ob) => ob.isEmpty && !ob.isLocked
+    );
+    const usedObligations = userObligations.filter(
+      (ob) => !ob.isEmpty || ob.isLocked
+    );
+
+    return (
+      <div className="modal-obligations-view">
+        <h2>Your Obligations</h2>
+
+        {error && <div className="error-message">{error}</div>}
+
+        {unlockResult && (
+          <div
+            className={`result-message ${
+              unlockResult.success ? "success" : "error"
+            }`}
+          >
+            <p>{unlockResult.message}</p>
+            {unlockResult.txLink && (
+              <a
+                href={unlockResult.txLink}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                View Transaction
+              </a>
+            )}
+          </div>
+        )}
+
+        {/* Create Obligation Button - Above the obligation cards */}
+        <div className="create-obligation-container">
+          <button
+            className="create-obligation-btn"
+            onClick={handleCreateObligation}
+            disabled={isCreatingObligation || !wallet.connected}
+          >
+            {isCreatingObligation ? "Creating..." : "Create New Obligation"}
+          </button>
+        </div>
+
+        {/* Display Empty/Unused Obligations First */}
+        {emptyObligations.length > 0 && (
+          <>
+            <h3 className="obligations-section-title">
+              New / Unused Obligations
+            </h3>
+            <div className="obligations-list">
+              {emptyObligations.map((obligation) => (
+                <div
+                  key={obligation.obligationId}
+                  className="obligation-card unused"
+                >
+                  <div className="obligation-header">
+                    <div className="obligation-id">
+                      ID: {obligation.obligationId.slice(0, 8)}...
+                      {obligation.obligationId.slice(-4)}
+                    </div>
+                    <div className="status unlocked">🟢 Unused</div>
+                  </div>
+
+                  <div className="obligation-details">
+                    <div className="collateral-section">
+                      <div className="label">Collateral ($0.00)</div>
+                      <div className="value">No collateral yet</div>
+                    </div>
+
+                    <div className="borrows-section">
+                      <div className="label">Borrows ($0.00)</div>
+                      <div className="value">No borrows yet</div>
+                    </div>
+                  </div>
+
+                  <div className="action-buttons">
+                    <button
+                      className="action-btn borrow-btn"
+                      onClick={() => {
+                        setSelectedObl(obligation);
+                        setCurrentView("borrowing");
+                      }}
+                      disabled={
+                        obligation.hasBorrowIncentiveStake ||
+                        obligation.hasBoostStake
+                      }
+                    >
+                      Use for Borrow
+                    </button>
+
+                    <button
+                      className="action-btn deposit-btn"
+                      onClick={() => openDepositModal(obligation)}
+                    >
+                      Deposit Collateral
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        {/* Regular/Used Obligations */}
+        {usedObligations.length > 0 && (
+          <>
+            {emptyObligations.length > 0 && (
+              <h3 className="obligations-section-title">Active Obligations</h3>
+            )}
+            <div className="obligations-list">
+              {usedObligations.map((obligation) => (
+                <div key={obligation.obligationId} className="obligation-card">
+                  <div className="obligation-header">
+                    <div className="obligation-id">
+                      ID: {obligation.obligationId.slice(0, 8)}...
+                      {obligation.obligationId.slice(-4)}
+                    </div>
+                    <div
+                      className={`status ${
+                        obligation.hasBorrowIncentiveStake ||
+                        obligation.hasBoostStake
+                          ? "staked"
+                          : "unlocked"
+                      }`}
+                    >
+                      {obligation.hasBorrowIncentiveStake ||
+                      obligation.hasBoostStake
+                        ? "🟠 Staked"
+                        : "🟢 Unlocked"}
+                    </div>
+                  </div>
+
+                  <div className="obligation-details">
+                    <div className="collateral-section">
+                      <div className="label">
+                        Collateral ($
+                        {formatNumber(
+                          obligation.collaterals.reduce(
+                            (sum, c) => sum + c.usd,
+                            0
+                          )
+                        )}
+                        )
+                      </div>
+                      <div className="value">
+                        {obligation.collaterals.length > 0
+                          ? obligation.collaterals.map((c, idx) => (
+                              <div key={idx}>
+                                {formatNumber(c.amount)} {c.symbol} ($
+                                {formatNumber(c.usd)})
+                              </div>
+                            ))
+                          : "No collateral"}
+                      </div>
+                    </div>
+
+                    <div className="borrows-section">
+                      <div className="label">
+                        Borrows ($
+                        {formatNumber(
+                          obligation.borrows.reduce((sum, b) => sum + b.usd, 0)
+                        )}
+                        )
+                      </div>
+                      <div className="value">
+                        {obligation.borrows.length > 0
+                          ? obligation.borrows.map((b, idx) => (
+                              <div key={idx}>
+                                {formatNumber(b.amount)} {b.symbol} ($
+                                {formatNumber(b.usd)})
+                              </div>
+                            ))
+                          : "No borrows"}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="action-buttons">
+                    <button
+                      className="action-btn borrow-btn"
+                      onClick={() => {
+                        setSelectedObl(obligation);
+                        setCurrentView("borrowing");
+                      }}
+                      disabled={
+                        obligation.hasBorrowIncentiveStake ||
+                        obligation.hasBoostStake
+                      }
+                    >
+                      Use for Borrow
+                    </button>
+
+                    <button
+                      className="action-btn deposit-btn"
+                      onClick={() => openDepositModal(obligation)}
+                    >
+                      Deposit Collateral
+                    </button>
+
+                    {/* Unstake button - only show for staked obligations */}
+                    {(obligation.hasBorrowIncentiveStake ||
+                      obligation.hasBoostStake) && (
+                      <button
+                        className="action-btn unstake-btn"
+                        onClick={() => handleUnlockObligation()}
+                        disabled={isLoading}
+                      >
+                        {isLoading ? "Unstaking..." : "Unstake"}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+
+        {userObligations.length === 0 && (
+          <div className="no-obligations">
+            <p>You don't have any obligations yet.</p>
+          </div>
+        )}
+
+        <div className="modal-footer-buttons">
+          <button
+            className="primary-btn back-btn"
+            onClick={() => setCurrentView("borrowing")}
+          >
+            Back to Borrowing
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  // Handle opening the deposit modal
+  const openDepositModal = (obligation: Obligation) => {
+    setDepositObligationId(obligation.obligationId);
+    setShowDepositModal(true);
+  };
+
+  // Handle creation of a new obligation
+  const handleCreateObligation = async () => {
+    if (!wallet.connected) {
+      setError("Please connect your wallet first");
+      return;
+    }
+
+    setIsCreatingObligation(true);
+    setError(null);
+
+    try {
+      const result = await scallopBorrowService.createObligation(wallet);
+
+      if (result.success) {
+        console.log("Successfully created obligation:", result);
+
+        // Refresh obligations
+        await fetchUserObligations();
+
+        setUnlockResult({
+          success: true,
+          message: `Successfully created new obligation ${
+            result.obligationId
+              ? `${result.obligationId.slice(
+                  0,
+                  6
+                )}...${result.obligationId.slice(-4)}`
+              : ""
+          }`,
+          txHash: result.digest,
+          txLink: result.txLink,
+        });
+
+        setTimeout(() => {
+          setUnlockResult(null);
+        }, 5000);
+      } else {
+        setError(`Failed to create obligation: ${result.error}`);
+      }
+    } catch (err) {
+      console.error("Error creating obligation:", err);
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      setError(`Error creating obligation: ${errorMsg}`);
+    } finally {
+      setIsCreatingObligation(false);
+    }
+  };
+
+  // Refresh data
+  const refreshData = () => {
+    fetchUserObligations();
+    fetchUserPortfolioData();
+  };
+
+  if (!onClose) return null;
+
+  return (
+    <div className="modal-overlay">
+      <div className="modal-container borrowing-modal">
+        <div className="modal-header">
+          <h2>
+            {currentView === "borrowing"
+              ? mode === "borrow"
+                ? "Borrow Assets"
+                : "Repay Debt"
+              : "Your Obligations"}
+          </h2>
+          <button className="close-btn" onClick={onClose}>
+            ×
+          </button>
+        </div>
+
+        <div className="modal-body">
+          {showDepositModal && depositObligationId && (
+            <DepositModal
+              obligationId={depositObligationId}
+              onClose={() => {
+                setShowDepositModal(false);
+                setDepositObligationId(null);
+              }}
+              refresh={refreshData}
+            />
+          )}
+
+          {isLoading || isInitialLoading ? (
+            <div className="loading-container">
+              <span className="loader"></span>
+              <p>
+                {isLoading
+                  ? `${mode === "borrow" ? "Borrowing" : "Repaying"}...`
+                  : "Loading your account data..."}
+              </p>
+              <p className="small-text">
+                This may take a moment while we process your transaction.
+              </p>
+            </div>
+          ) : transactionResult ? (
+            <div
+              className={`result-container ${
+                transactionResult.success ? "success" : "error"
+              }`}
+            >
+              <h3>
+                {transactionResult.success
+                  ? "Transaction Successful"
+                  : "Transaction Failed"}
+              </h3>
+              <p>{transactionResult.message}</p>
+
+              {transactionResult.txHash && (
+                <div className="tx-details">
+                  <p>
+                    Transaction Hash:{" "}
+                    <span className="tx-hash">
+                      {transactionResult.txHash.slice(0, 10)}...
+                      {transactionResult.txHash.slice(-8)}
+                    </span>
+                  </p>
+                  {transactionResult.txLink && (
+                    <a
+                      href={transactionResult.txLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="tx-link"
+                    >
+                      View Transaction
+                    </a>
+                  )}
                 </div>
               )}
 
-              {suggestedAmount !== null && (
-                <div className="suggested-amount-container">
-                  <p>
-                    Suggested amount: {suggestedAmount}{" "}
-                    {COINS[borrowAsset].symbol}
-                  </p>
-                  <button
-                    className="use-suggested-btn"
-                    onClick={handleUseSuggestedAmount}
-                  >
-                    Use Suggested Amount
-                  </button>
-                </div>
+              {transactionResult.error && (
+                <p className="error-message">
+                  Error: {transactionResult.error}
+                </p>
               )}
 
               <div className="action-buttons">
                 <button
-                  className="submit-btn primary-btn"
-                  onClick={handleBorrow}
-                  disabled={
-                    !wallet.connected ||
-                    isLoading ||
-                    borrowAmount === "" ||
-                    Number(borrowAmount) <= 0
+                  className="primary-btn"
+                  onClick={
+                    transactionResult.success
+                      ? onClose
+                      : () => setTransactionResult(null)
                   }
                 >
-                  Borrow {COINS[borrowAsset].symbol}
+                  {transactionResult.success ? "Close" : "Try Again"}
                 </button>
-
-                <div className="debug-buttons">
+              </div>
+            </div>
+          ) : currentView === "obligations" ? (
+            renderObligationsView()
+          ) : (
+            <div className="borrowing-view">
+              {/* Show the active obligation from props */}
+              <div className="selected-obligation">
+                <div className="obligation-header">
+                  <p className="obligation-info">
+                    Using obligation: {currentObligationId.slice(0, 8)}...
+                    {currentObligationId.slice(-4)}
+                    {selectedObl?.isLocked && (
+                      <span className="locked-indicator"> 🔒 Locked</span>
+                    )}
+                  </p>
                   <button
-                    className="debug-btn secondary-btn"
-                    onClick={debugBorrowInternal}
-                    disabled={isLoading || !wallet.connected}
+                    className="change-btn"
+                    onClick={() => setCurrentView("obligations")}
                   >
-                    Debug Internal
-                  </button>
-
-                  <button
-                    className="analyze-btn secondary-btn"
-                    onClick={analyzeTransactionStructure}
-                    disabled={isLoading || !wallet.connected}
-                  >
-                    Analyze TX Structure
+                    Change
                   </button>
                 </div>
-              </div>
 
-              <div className="borrowing-info">
-                <p>
-                  Borrowing assets requires collateral in your lending account.
-                  Your health factor must remain above 1.0 after borrowing.
-                </p>
-                <p className="min-borrow-warning">
-                  <strong>Note:</strong> Minimum borrow amounts apply:{" "}
-                  {MIN_BORROW_AMOUNTS[borrowAsset]} {COINS[borrowAsset].symbol}{" "}
-                  for standard transactions.
-                </p>
-
-                {onChainMinimum &&
-                  onChainMinimum > MIN_BORROW_AMOUNTS[borrowAsset] && (
-                    <p className="on-chain-min-note">
-                      <strong>On-chain minimum:</strong> {onChainMinimum}{" "}
-                      {COINS[borrowAsset].symbol}
-                    </p>
-                  )}
-
-                {sdkInfo && (
-                  <div className="sdk-info">
+                {/* Display collateral details if available */}
+                {selectedObl && selectedObl.collaterals.length > 0 && (
+                  <div className="collateral-details">
+                    <h4>Collateral in this obligation:</h4>
+                    <ul className="collateral-list">
+                      {selectedObl.collaterals.map((c, idx) => (
+                        <li key={idx}>
+                          {formatNumber(c.amount, 4)} {c.symbol} ($
+                          {formatNumber(c.usd, 2)})
+                        </li>
+                      ))}
+                    </ul>
                     <p>
-                      <small>Network: {sdkInfo.networkType}</small>
-                    </p>
-                    <p>
-                      <small>SDK Version: {sdkInfo.sdkVersion}</small>
-                    </p>
-                    <p>
-                      <small>
-                        Last Updated: 2025-06-07 02:13:12 by jake1318
-                      </small>
+                      Total value: $
+                      {formatNumber(getTotalCollateralValue(selectedObl), 2)}
                     </p>
                   </div>
                 )}
+
+                {/* Show unlock button directly if the obligation is locked */}
+                {selectedObl?.isLocked && (
+                  <div className="unlock-prompt">
+                    <p>
+                      This obligation is locked. You need to unstake it before
+                      borrowing.
+                    </p>
+                    <button
+                      className="unstake-btn"
+                      onClick={handleUnlockObligation}
+                      disabled={isLoading}
+                    >
+                      {isLoading ? "Unstaking..." : "Unstake Obligation"}
+                    </button>
+                  </div>
+                )}
+
+                {/* Show add collateral button if no collateral */}
+                {selectedObl && !hasCollateral(selectedObl) && (
+                  <div className="no-collateral-prompt">
+                    <p>
+                      This obligation has no collateral. You need to add some
+                      before borrowing.
+                    </p>
+                    <button
+                      className="deposit-btn"
+                      onClick={handleAddCollateral}
+                    >
+                      Add Collateral
+                    </button>
+                  </div>
+                )}
               </div>
-            </>
+
+              {/* Asset selector and rest of the UI */}
+              <div className="asset-selector">
+                <h3>
+                  Select Asset to {mode === "borrow" ? "Borrow" : "Repay"}
+                </h3>
+                <div className="asset-options">
+                  {Object.entries(COINS).map(([symbol, data]) => (
+                    <div
+                      key={symbol}
+                      className={`asset-option ${
+                        borrowAsset === symbol ? "selected" : ""
+                      }`}
+                      onClick={() => handleAssetChange(symbol)}
+                    >
+                      <img
+                        src={data.icon}
+                        alt={symbol}
+                        className="asset-icon"
+                      />
+                      <span>{symbol}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="amount-input-container">
+                <label htmlFor="borrow-amount">
+                  {mode === "borrow" ? "Amount to Borrow" : "Amount to Repay"}
+                </label>
+                <div className="input-with-btn">
+                  <input
+                    type="text"
+                    id="borrow-amount"
+                    value={actionAmount}
+                    onChange={handleAmountChange}
+                    placeholder="0.00"
+                    disabled={
+                      isLoading ||
+                      (mode === "borrow" && !hasCollateral(selectedObl))
+                    }
+                  />
+                  <div className="amount-actions">
+                    {selectedObl && hasCollateral(selectedObl) && (
+                      <button
+                        className="safe-btn"
+                        onClick={handleUseSafeAmount}
+                        disabled={isLoading || maxBorrowTokens <= 0}
+                      >
+                        Use Safe Amount
+                      </button>
+                    )}
+                    {mode === "repay" &&
+                      selectedObl?.borrows.some(
+                        (b) => b.symbol === borrowAsset
+                      ) && (
+                        <button
+                          className="max-btn"
+                          onClick={handleUseMaxAmount}
+                          disabled={isLoading}
+                        >
+                          Max
+                        </button>
+                      )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Info sections */}
+              {mode === "borrow" &&
+                selectedObl &&
+                hasCollateral(selectedObl) && (
+                  <div className="info-container">
+                    <div className="info-row">
+                      <span className="info-icon">ℹ️</span>
+                      <span>
+                        Maximum safe borrow amount: $
+                        {maxBorrowUsd > 0
+                          ? formatNumber(maxBorrowUsd, 2)
+                          : "0.00"}
+                      </span>
+                    </div>
+                    <div className="info-row">
+                      <span className="info-icon">ℹ️</span>
+                      <span>
+                        Maximum {borrowAsset}:{" "}
+                        {maxBorrowTokens > 0
+                          ? formatNumber(maxBorrowTokens, 6)
+                          : "0.00"}
+                      </span>
+                    </div>
+                    <div className="info-row">
+                      <span className="info-icon">ℹ️</span>
+                      <span>
+                        Current health factor:
+                        <span
+                          className={`health-factor ${
+                            healthFactor !== null && healthFactor < 1.2
+                              ? "warning"
+                              : healthFactor !== null && healthFactor < 1.5
+                              ? "caution"
+                              : "good"
+                          }`}
+                        >
+                          {healthFactor !== null
+                            ? healthFactor > 99
+                              ? "∞"
+                              : formatNumber(healthFactor, 2)
+                            : "Loading..."}
+                        </span>
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+              {error && <div className="error-message">{error}</div>}
+
+              {unlockResult && (
+                <div
+                  className={`result-message ${
+                    unlockResult.success ? "success" : "error"
+                  }`}
+                >
+                  <p>{unlockResult.message}</p>
+                  {unlockResult.txLink && (
+                    <a
+                      href={unlockResult.txLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      View Transaction
+                    </a>
+                  )}
+                </div>
+              )}
+
+              {mode === "borrow" && !hasCollateral(selectedObl) ? (
+                <button
+                  className="submit-btn add-collateral-btn"
+                  onClick={handleAddCollateral}
+                >
+                  Add Collateral First
+                </button>
+              ) : (
+                <button
+                  className="submit-btn"
+                  onClick={handleSubmit}
+                  disabled={
+                    !wallet.connected ||
+                    isLoading ||
+                    actionAmount === "" ||
+                    parseFloat(actionAmount) <= 0 ||
+                    (mode === "borrow" && !hasCollateral(selectedObl)) ||
+                    (mode === "borrow" && isObligationLocked())
+                  }
+                >
+                  {mode === "borrow" && isObligationLocked()
+                    ? "Obligation Locked - Unstake First"
+                    : `${
+                        mode === "borrow" ? "Borrow" : "Repay"
+                      } ${borrowAsset}`}
+                </button>
+              )}
+
+              {maxBorrowUsd <= 0 &&
+                selectedObl &&
+                mode === "borrow" &&
+                hasCollateral(selectedObl) && (
+                  <div className="warning-message">
+                    Maximum safe borrow amount is approximately $0.00. This
+                    could mean either your collateral value is too low or an
+                    issue accessing the price feed.
+                  </div>
+                )}
+
+              <p className="disclaimer">
+                {mode === "borrow"
+                  ? "Borrowing incurs interest that will need to be repaid. Ensure you maintain sufficient collateral to avoid liquidation."
+                  : "Repaying your debt will reduce your interest costs and improve your position's health factor."}
+              </p>
+            </div>
           )}
         </div>
       </div>

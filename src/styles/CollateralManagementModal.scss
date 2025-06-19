@@ -1,0 +1,335 @@
+// src/styles/CollateralManagementModal.scss
+// Last updated: 2025-06-10 03:31:54 UTC by jake1318
+
+.collateral-modal {
+  max-width: 500px;
+  width: 100%;
+
+  .modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.5rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    background-color: rgba(24, 29, 49, 0.9);
+
+    h2 {
+      margin: 0;
+      font-size: 1.5rem;
+      font-weight: 600;
+      color: #fff;
+    }
+
+    .close-btn {
+      background: none;
+      border: none;
+      color: #ffffff;
+      font-size: 1.5rem;
+      cursor: pointer;
+      outline: none;
+      padding: 0.25rem 0.5rem;
+
+      &:hover {
+        color: #ff4757;
+      }
+    }
+  }
+
+  .modal-body {
+    padding: 1.5rem;
+
+    .asset-info {
+      margin-bottom: 2rem;
+      background-color: rgba(10, 15, 30, 0.5);
+      border-radius: 0.5rem;
+      padding: 1rem;
+
+      .info-row {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 0.75rem;
+
+        &:last-child {
+          margin-bottom: 0;
+        }
+
+        span:first-child {
+          color: #8a94a7;
+          font-size: 0.9rem;
+        }
+
+        span:last-child {
+          font-weight: 500;
+          color: #fff;
+        }
+
+        .obligation-id {
+          font-family: monospace;
+          background-color: rgba(255, 255, 255, 0.1);
+          padding: 0.25rem 0.5rem;
+          border-radius: 0.25rem;
+          font-size: 0.8rem;
+        }
+
+        &.wallet-status {
+          .connected {
+            color: #38c172;
+          }
+
+          .disconnected {
+            color: #ff4757;
+          }
+
+          .status-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 6px;
+
+            &.connected {
+              background-color: #38c172;
+            }
+
+            &.disconnected {
+              background-color: #ff4757;
+            }
+          }
+        }
+      }
+    }
+
+    .amount-input-container {
+      margin-bottom: 1.5rem;
+
+      label {
+        display: block;
+        margin-bottom: 0.5rem;
+        font-weight: 500;
+        color: #fff;
+      }
+
+      .input-with-max {
+        display: flex;
+        margin-bottom: 0.5rem;
+
+        input {
+          flex: 1;
+          padding: 0.75rem 1rem;
+          border: 1px solid rgba(255, 255, 255, 0.2);
+          border-radius: 0.5rem 0 0 0.5rem;
+          background-color: rgba(10, 15, 30, 0.5);
+          color: #fff;
+          font-size: 1rem;
+          outline: none;
+
+          &:focus {
+            border-color: #3490dc;
+          }
+        }
+
+        .max-btn {
+          background-color: rgba(52, 144, 220, 0.2);
+          border: 1px solid #3490dc;
+          border-left: none;
+          color: #3490dc;
+          padding: 0 1rem;
+          border-radius: 0 0.5rem 0.5rem 0;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.2s ease;
+
+          &:hover {
+            background-color: rgba(52, 144, 220, 0.3);
+          }
+
+          &:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+          }
+        }
+      }
+
+      .amount-in-usd {
+        font-size: 0.9rem;
+        color: #8a94a7;
+        margin-top: 0.5rem;
+      }
+    }
+
+    .error-message {
+      background-color: rgba(255, 71, 87, 0.1);
+      border: 1px solid rgba(255, 71, 87, 0.3);
+      color: #ff4757;
+      padding: 0.75rem;
+      border-radius: 0.5rem;
+      margin-bottom: 1.5rem;
+      font-size: 0.9rem;
+    }
+
+    .collateral-info {
+      margin-bottom: 1.5rem;
+
+      .info-text {
+        font-size: 0.9rem;
+        color: #8a94a7;
+        line-height: 1.5;
+        padding: 0.75rem;
+        background-color: rgba(52, 144, 220, 0.1);
+        border: 1px solid rgba(52, 144, 220, 0.3);
+        border-radius: 0.5rem;
+      }
+    }
+
+    .action-buttons {
+      display: flex;
+      gap: 1rem;
+      margin-top: 1.5rem;
+
+      button {
+        flex: 1;
+        padding: 0.75rem 1rem;
+        border-radius: 0.5rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        border: none;
+
+        &.primary-btn {
+          background-color: #3490dc;
+          color: white;
+
+          &:hover:not(:disabled) {
+            background-color: #2779bd;
+          }
+        }
+
+        &.cancel-btn {
+          background-color: rgba(255, 255, 255, 0.1);
+          color: #fff;
+
+          &:hover {
+            background-color: rgba(255, 255, 255, 0.2);
+          }
+        }
+
+        &:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+      }
+    }
+
+    .loading-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem 0;
+
+      .loader {
+        border: 4px solid rgba(255, 255, 255, 0.1);
+        border-radius: 50%;
+        border-top: 4px solid #3490dc;
+        width: 40px;
+        height: 40px;
+        animation: spin 1s linear infinite;
+        margin-bottom: 1.5rem;
+      }
+
+      @keyframes spin {
+        0% {
+          transform: rotate(0deg);
+        }
+        100% {
+          transform: rotate(360deg);
+        }
+      }
+
+      p {
+        margin: 0.5rem 0;
+        text-align: center;
+      }
+
+      .processing-step {
+        font-size: 0.9rem;
+        color: #8a94a7;
+      }
+
+      .small-text {
+        font-size: 0.8rem;
+        color: #8a94a7;
+      }
+    }
+
+    .result-container {
+      text-align: center;
+      padding: 1.5rem 0;
+
+      &.success {
+        h3 {
+          color: #38c172;
+          margin-top: 0;
+        }
+      }
+
+      p {
+        margin-bottom: 1.5rem;
+      }
+
+      .tx-details {
+        background-color: rgba(10, 15, 30, 0.5);
+        border-radius: 0.5rem;
+        padding: 1rem;
+        margin-bottom: 1.5rem;
+        text-align: left;
+
+        .tx-hash {
+          color: #8a94a7;
+          font-size: 0.9rem;
+          margin-bottom: 0.5rem;
+        }
+
+        .tx-link {
+          color: #3490dc;
+          text-decoration: none;
+          font-weight: 500;
+
+          &:hover {
+            text-decoration: underline;
+          }
+        }
+      }
+    }
+
+    .last-updated {
+      text-align: center;
+      font-size: 0.8rem;
+      color: #8a94a7;
+      margin-top: 1.5rem;
+      padding-top: 1rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+    }
+  }
+}
+
+// Additional styles for mobile responsiveness
+@media (max-width: 600px) {
+  .modal-overlay {
+    padding: 0 1rem;
+
+    .collateral-modal {
+      max-width: 100%;
+    }
+  }
+}
+
+// Styles specifically for the withdraw collateral view
+.withdraw-collateral-view {
+  .collateral-info {
+    .info-text {
+      background-color: rgba(255, 160, 0, 0.1);
+      border-color: rgba(255, 160, 0, 0.3);
+    }
+  }
+}

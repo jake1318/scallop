@@ -1,6 +1,13 @@
-import React, { useState } from "react";
+// LendingActionModal.tsx
+// Last Updated: 2025-06-13 01:45:46 UTC by jake1318
+
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useWallet } from "@suiet/wallet-kit";
 import scallopService from "../scallop/ScallopService";
+import {
+  getAccountCoins,
+  getCoinBalance,
+} from "../services/blockvisionService";
 import "../styles/LendingActionModal.scss";
 
 interface AssetInfo {
@@ -10,13 +17,14 @@ interface AssetInfo {
   borrowApy: number;
   decimals: number;
   price: number;
+  suppliedAmount?: number; // Optional - amount user has supplied
 }
 
 interface LendingActionModalProps {
   open: boolean;
   onClose: () => void;
   asset: AssetInfo;
-  action: "deposit" | "withdraw" | "borrow" | "repay";
+  action: "deposit" | "withdraw" | "borrow" | "repay" | "claim";
   onSuccess?: () => void;
 }
 
@@ -32,9 +40,47 @@ const LendingActionModal: React.FC<LendingActionModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<any>(null);
   const [txHash, setTxHash] = useState<string | null>(null);
+  const [walletBalance, setWalletBalance] = useState<number | null>(null);
+  const [isMaxAmount, setIsMaxAmount] = useState(false);
 
   // Get the full wallet object
   const wallet = useWallet();
+
+  // -----------------------------------------------------------------
+  // Fetch wallet balance whenever:
+  //   • the modal opens
+  //   • the connected account changes
+  //   • the asset being shown changes
+  // -----------------------------------------------------------------
+  const refreshBalance = useCallback(async () => {
+    try {
+      if (!wallet.connected) return setWalletBalance(null);
+
+      const coins = await getAccountCoins(wallet.address as string);
+      const bal = getCoinBalance(coins, asset.coinType, asset.decimals);
+      setWalletBalance(bal);
+    } catch (e) {
+      console.warn("Could not fetch wallet balance:", e);
+      setWalletBalance(null); // show "—" in UI on failure
+    }
+  }, [wallet.connected, wallet.address, asset.coinType, asset.decimals]);
+
+  useEffect(() => {
+    if (open) {
+      refreshBalance();
+      setIsMaxAmount(false); // Reset MAX flag when modal opens
+    }
+  }, [open, refreshBalance]);
+
+  // -----------------------------------------------------------------
+  // Helpers now rely on the fetched balance
+  // -----------------------------------------------------------------
+  const maxAmount = useMemo(() => {
+    if (action === "deposit") return walletBalance ?? 0;
+    if (action === "withdraw") return asset.suppliedAmount ?? 0;
+    if (action === "borrow") return 0; // TODO: use HF
+    return 0; // repay
+  }, [action, walletBalance, asset.suppliedAmount]);
 
   // Handle amount change
   const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -43,6 +89,10 @@ const LendingActionModal: React.FC<LendingActionModalProps> = ({
     if (value === "" || /^[0-9]*\.?[0-9]*$/.test(value)) {
       setAmount(value);
       setError(null); // Clear any previous error
+
+      // Check if this amount equals the max amount (within a small epsilon)
+      const parsedAmount = parseFloat(value);
+      setIsMaxAmount(Math.abs(parsedAmount - maxAmount) < 0.000001);
     }
   };
 
@@ -53,31 +103,21 @@ const LendingActionModal: React.FC<LendingActionModalProps> = ({
       return false;
     }
 
+    if (action === "deposit" && walletBalance != null) {
+      if (parseFloat(amount) > walletBalance) {
+        setError("Amount exceeds wallet balance");
+        return false;
+      }
+    }
+
     // Add other validation rules as needed
     return true;
   };
 
-  const getMaxAmount = (): string => {
-    // This is placeholder logic, you'd need to implement proper max amount
-    // calculations based on your business rules
-    if (action === "deposit") {
-      // Max deposit might be limited by the wallet balance
-      return "10"; // Example
-    } else if (action === "withdraw") {
-      // Max withdraw would be the user's supplied balance
-      return "5"; // Example
-    } else if (action === "borrow") {
-      // Max borrow might be limited by collateral
-      return "2"; // Example
-    } else {
-      // Max repay would be the user's borrowed balance
-      return "1"; // Example
-    }
-  };
-
   // Set maximum amount
   const handleSetMax = () => {
-    setAmount(getMaxAmount());
+    setAmount(maxAmount.toString());
+    setIsMaxAmount(true); // Set the MAX flag when MAX button is clicked
   };
 
   // Get action label
@@ -91,6 +131,8 @@ const LendingActionModal: React.FC<LendingActionModalProps> = ({
         return "Borrow";
       case "repay":
         return "Repay";
+      case "claim":
+        return "Claim";
       default:
         return "Submit";
     }
@@ -107,6 +149,8 @@ const LendingActionModal: React.FC<LendingActionModalProps> = ({
         return "Borrowing";
       case "repay":
         return "Repaying";
+      case "claim":
+        return "Claiming";
       default:
         return "Processing";
     }
@@ -118,11 +162,12 @@ const LendingActionModal: React.FC<LendingActionModalProps> = ({
     setResult(null);
     setTxHash(null);
     setLoading(false);
+    setIsMaxAmount(false);
   };
 
   // Handle the lending action
   const performTransaction = async () => {
-    if (!validateAmount()) {
+    if (action !== "claim" && !validateAmount()) {
       return;
     }
 
@@ -133,11 +178,12 @@ const LendingActionModal: React.FC<LendingActionModalProps> = ({
       const amountNum = parseFloat(amount);
 
       console.log(`Performing ${action} with:`, {
-        amount: amountNum,
+        amount: action !== "claim" ? amountNum : "N/A",
         asset: asset.symbol,
         coinType: asset.coinType,
         decimals: asset.decimals,
         walletConnected: !!wallet.connected,
+        isMax: isMaxAmount,
       });
 
       if (!wallet.connected) {
@@ -157,11 +203,13 @@ const LendingActionModal: React.FC<LendingActionModalProps> = ({
           );
           break;
         case "withdraw":
+          // Pass the isMax flag to help with withdraw strategy selection
           txResult = await scallopService.withdraw(
             wallet,
             asset.coinType,
             amountNum,
-            asset.decimals
+            asset.decimals,
+            isMaxAmount
           );
           break;
         case "borrow":
@@ -180,6 +228,9 @@ const LendingActionModal: React.FC<LendingActionModalProps> = ({
             asset.decimals
           );
           break;
+        case "claim":
+          txResult = await scallopService.claimSupplyRewards(wallet);
+          break;
         default:
           throw new Error("Invalid action");
       }
@@ -189,7 +240,10 @@ const LendingActionModal: React.FC<LendingActionModalProps> = ({
       if (txResult.success) {
         setResult({
           success: true,
-          message: `Successfully ${action}ed ${amountNum} ${asset.symbol}`,
+          message:
+            action === "claim"
+              ? `Successfully claimed rewards`
+              : `Successfully ${action}ed ${amountNum} ${asset.symbol}`,
           txHash: txResult.digest,
           txLink: txResult.txLink,
         });
@@ -202,7 +256,10 @@ const LendingActionModal: React.FC<LendingActionModalProps> = ({
       } else {
         setResult({
           success: false,
-          message: `Failed to ${action} ${amountNum} ${asset.symbol}`,
+          message:
+            action === "claim"
+              ? `Failed to claim rewards`
+              : `Failed to ${action} ${amountNum} ${asset.symbol}`,
           error: txResult.error,
         });
         setError(txResult.error || `Transaction failed`);
@@ -211,7 +268,10 @@ const LendingActionModal: React.FC<LendingActionModalProps> = ({
       console.error(`Error in ${action}:`, err);
       setResult({
         success: false,
-        message: `Error ${action}ing ${asset.symbol}`,
+        message:
+          action === "claim"
+            ? `Error claiming rewards`
+            : `Error ${action}ing ${asset.symbol}`,
         error: err.message || String(err),
       });
       setError(
@@ -231,7 +291,7 @@ const LendingActionModal: React.FC<LendingActionModalProps> = ({
       <div className="modal-container">
         <div className="modal-header">
           <h2>
-            {getActionLabel()} {asset.symbol}
+            {getActionLabel()} {action !== "claim" ? asset.symbol : "Rewards"}
           </h2>
           <button className="close-btn" onClick={onClose}>
             ×
@@ -304,11 +364,30 @@ const LendingActionModal: React.FC<LendingActionModalProps> = ({
                   <span>${asset.price.toFixed(4)}</span>
                 </div>
                 {action === "deposit" && (
-                  <div className="info-row">
-                    <span>Supply APY:</span>
-                    <span>{asset.depositApy.toFixed(2)}%</span>
-                  </div>
+                  <>
+                    <div className="info-row">
+                      <span>Supply APY:</span>
+                      <span>{asset.depositApy.toFixed(2)}%</span>
+                    </div>
+                    <div className="info-row">
+                      <span>Wallet Balance:</span>
+                      <span>
+                        {walletBalance == null
+                          ? "—"
+                          : `${walletBalance.toFixed(4)} ${asset.symbol}`}
+                      </span>
+                    </div>
+                  </>
                 )}
+                {action === "withdraw" &&
+                  asset.suppliedAmount !== undefined && (
+                    <div className="info-row">
+                      <span>Supplied Balance:</span>
+                      <span>
+                        {asset.suppliedAmount.toFixed(4)} {asset.symbol}
+                      </span>
+                    </div>
+                  )}
                 {action === "borrow" && (
                   <div className="info-row">
                     <span>Borrow APY:</span>
@@ -317,36 +396,48 @@ const LendingActionModal: React.FC<LendingActionModalProps> = ({
                 )}
               </div>
 
-              <div className="amount-input-container">
-                <label htmlFor="amount">Amount</label>
-                <div className="input-with-max">
-                  <input
-                    type="text"
-                    id="amount"
-                    value={amount}
-                    onChange={handleAmountChange}
-                    placeholder="0.00"
-                    disabled={loading}
-                  />
-                  <button
-                    className="max-btn"
-                    onClick={handleSetMax}
-                    disabled={loading}
-                  >
-                    MAX
-                  </button>
+              {action !== "claim" && (
+                <div className="amount-input-container">
+                  <label htmlFor="amount">Amount</label>
+                  <div className="input-with-max">
+                    <input
+                      type="text"
+                      id="amount"
+                      value={amount}
+                      onChange={handleAmountChange}
+                      placeholder="0.00"
+                      disabled={loading}
+                    />
+                    <button
+                      className="max-btn"
+                      onClick={handleSetMax}
+                      disabled={loading}
+                    >
+                      MAX
+                    </button>
+                  </div>
+                  <div className="amount-in-usd">
+                    ≈ ${(parseFloat(amount || "0") * asset.price).toFixed(2)}
+                  </div>
+
+                  {/* Add a hint for withdraw that using MAX is more reliable */}
+                  {action === "withdraw" && !isMaxAmount && (
+                    <div className="hint-text">
+                      For most reliable withdrawals, we recommend using MAX
+                    </div>
+                  )}
                 </div>
-                <div className="amount-in-usd">
-                  ≈ ${(parseFloat(amount || "0") * asset.price).toFixed(2)}
-                </div>
-              </div>
+              )}
 
               {error && <div className="error-message">{error}</div>}
 
               <button
                 className="submit-btn"
                 onClick={performTransaction}
-                disabled={loading || !amount || parseFloat(amount) <= 0}
+                disabled={
+                  loading ||
+                  (action !== "claim" && (!amount || parseFloat(amount) <= 0))
+                }
               >
                 {loading ? `${getActionVerb()}...` : getActionLabel()}
               </button>
