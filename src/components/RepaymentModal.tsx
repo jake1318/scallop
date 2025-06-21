@@ -1,18 +1,22 @@
 // src/components/RepaymentModal.tsx
-// Last Updated: 2025-06-19 02:19:42 UTC by jake1318
+// Last Updated: 2025-06-21 01:31:22 UTC by jake1318Why
 
 import React, { useState, useEffect } from "react";
 import { useWallet } from "@suiet/wallet-kit";
 import scallopService from "../scallop/ScallopService";
+import { scallop } from "../scallop/ScallopService"; // Import scallop directly to set signer
 import scallopBorrowService from "../scallop/ScallopBorrowService";
 import { getObligationId } from "../scallop/ScallopCollateralService";
 import {
-  repayObligation,
-  unlockAndRepayObligation,
+  repayUnlockedObligation,
+  repayMaximumDebt,
+  unlockAndRepay,
   isObligationLocked,
 } from "../scallop/ScallopIncentiveService";
 import "../styles/BorrowingActionModal.scss";
 import * as blockvisionService from "../services/blockvisionService"; // Import the blockvision service
+// Updated import using the correct path structure from @mysten/sui
+import type { SignerWithProvider } from "@mysten/sui/signers";
 
 // Simple utility functions
 const formatNumber = (num: number, decimals: number = 2): string => {
@@ -59,7 +63,7 @@ const LockIcon = () => (
   </svg>
 );
 
-// Constants for coin configuration - updated to handle multiple coin types
+// Constants for coin configuration - using raw asset names
 const COINS = {
   SUI: {
     symbol: "SUI",
@@ -70,7 +74,7 @@ const COINS = {
   },
   USDC: {
     symbol: "USDC",
-    name: "usdc",
+    name: "usdc", // Use raw "usdc", SDK handles wrapping
     decimals: 6,
     icon: "/icons/usdc-icon.svg",
     coinTypes: [
@@ -81,7 +85,7 @@ const COINS = {
   },
   USDT: {
     symbol: "USDT",
-    name: "usdt",
+    name: "usdt", // Use raw "usdt", SDK handles wrapping
     decimals: 6,
     icon: "/icons/usdt-icon.svg",
     coinTypes: [
@@ -153,6 +157,38 @@ const RepaymentModal: React.FC<RepaymentModalProps> = ({
   const [isInitialLoading, setIsInitialLoading] = useState<boolean>(true);
   const [accountCoins, setAccountCoins] = useState<any[]>([]); // Store all account coins from blockvision
   const [obligationDetails, setObligationDetails] = useState<any>(null);
+  const [repayMaximum, setRepayMaximum] = useState<boolean>(false);
+  const [signerSet, setSignerSet] = useState<boolean>(false);
+
+  // Set Scallop signer to wallet when connected
+  useEffect(() => {
+    if (wallet.connected && wallet.adapter) {
+      const initScallopAndSetSigner = async () => {
+        try {
+          // Initialize Scallop if needed
+          if (!scallop.client) {
+            await scallop.init();
+          }
+
+          // Set the signer to the connected wallet
+          console.log(
+            "[RepaymentModal] Setting Scallop signer to wallet adapter"
+          );
+          // FIXED: Use suiKit.useSigner instead of non-existent setSigner method
+          scallop.suiKit.useSigner(wallet.adapter as SignerWithProvider);
+          setSignerSet(true);
+        } catch (error) {
+          console.error(
+            "[RepaymentModal] Error setting Scallop signer:",
+            error
+          );
+          setSignerSet(false);
+        }
+      };
+
+      initScallopAndSetSigner();
+    }
+  }, [wallet.connected, wallet.adapter]);
 
   // Fetch obligation ID and user portfolio data when component mounts
   useEffect(() => {
@@ -164,7 +200,7 @@ const RepaymentModal: React.FC<RepaymentModalProps> = ({
         }
       );
     }
-  }, [wallet.connected, wallet.address, selectedAsset]);
+  }, [wallet.connected, wallet.address, selectedAsset, signerSet]);
 
   // Fetch all wallet coins using blockvision service
   const fetchWalletCoins = async () => {
@@ -382,6 +418,7 @@ const RepaymentModal: React.FC<RepaymentModalProps> = ({
     // Allow only numbers and a single decimal point
     if (value === "" || /^[0-9]*\.?[0-9]*$/.test(value)) {
       setRepayAmount(value);
+      setRepayMaximum(false); // Setting a specific amount disables "repay maximum"
       setError(null); // Clear any previous error
     }
   };
@@ -390,6 +427,7 @@ const RepaymentModal: React.FC<RepaymentModalProps> = ({
   const handleAssetChange = (asset: string) => {
     setSelectedAsset(asset);
     setRepayAmount(""); // Reset amount when asset changes
+    setRepayMaximum(false); // Reset repay maximum flag
 
     // Update current debt based on selected asset
     const debt = borrowedAssets.find((a) => a.symbol === asset);
@@ -405,18 +443,16 @@ const RepaymentModal: React.FC<RepaymentModalProps> = ({
       SAFE_REPAY_AMOUNTS[selectedAsset as keyof typeof SAFE_REPAY_AMOUNTS] ??
       SAFE_REPAY_AMOUNTS.USDC;
     setRepayAmount(safeAmount.toString());
+    setRepayMaximum(false);
   };
 
   // Set maximum amount (repay full debt)
   const handleUseMaxAmount = () => {
     if (currentDebt !== null) {
-      if (walletBalance !== null && walletBalance < currentDebt) {
-        // If wallet balance is less than debt, use all available balance
-        setRepayAmount(walletBalance.toString());
-      } else {
-        // Otherwise use the full debt amount
-        setRepayAmount(currentDebt.toString());
-      }
+      // Instead of setting a specific amount, just enable "repay maximum" flag
+      // and show the full debt amount in the input for user feedback
+      setRepayAmount(currentDebt.toString());
+      setRepayMaximum(true);
     }
   };
 
@@ -427,27 +463,44 @@ const RepaymentModal: React.FC<RepaymentModalProps> = ({
       return false;
     }
 
-    if (!repayAmount || parseFloat(repayAmount) <= 0) {
+    if (!signerSet) {
+      setError("Wallet not properly connected to Scallop SDK");
+      return false;
+    }
+
+    if (!repayMaximum && (!repayAmount || parseFloat(repayAmount) <= 0)) {
       setError("Please enter a valid repayment amount");
       return false;
     }
 
-    const amount = parseFloat(repayAmount);
+    if (!repayMaximum) {
+      const amount = parseFloat(repayAmount);
 
-    if (currentDebt !== null && amount > currentDebt) {
-      setError(
-        `You only have ${currentDebt.toFixed(6)} ${selectedAsset} debt to repay`
-      );
-      return false;
-    }
+      if (currentDebt !== null && amount > currentDebt) {
+        setError(
+          `You only have ${currentDebt.toFixed(
+            6
+          )} ${selectedAsset} debt to repay`
+        );
+        return false;
+      }
 
-    if (walletBalance !== null && amount > walletBalance) {
-      setError(
-        `You don't have enough ${selectedAsset} in your wallet. Balance: ${walletBalance.toFixed(
-          6
-        )}`
-      );
-      return false;
+      if (walletBalance !== null && amount > walletBalance) {
+        setError(
+          `You don't have enough ${selectedAsset} in your wallet. Balance: ${walletBalance.toFixed(
+            6
+          )}`
+        );
+        return false;
+      }
+    } else {
+      // When repaying maximum, check if user has any balance to repay with
+      if (walletBalance !== null && walletBalance <= 0) {
+        setError(
+          `You don't have any ${selectedAsset} in your wallet to repay with`
+        );
+        return false;
+      }
     }
 
     if (!obligationId) {
@@ -468,49 +521,83 @@ const RepaymentModal: React.FC<RepaymentModalProps> = ({
     setError(null);
 
     try {
-      const amt = parseFloat(repayAmount);
       const coinCfg = COINS[selectedAsset as keyof typeof COINS];
 
       if (!coinCfg) {
         throw new Error(`Unknown coin: ${selectedAsset}`);
       }
 
-      // Convert to base units using BigInt
-      const baseUnits = BigInt(
-        Math.floor(amt * Math.pow(10, coinCfg.decimals))
-      );
+      // Convert symbol to lowercase for the API
+      const asset = coinCfg.name.toLowerCase() as "usdc" | "sui" | "usdt";
 
-      // Choose the appropriate function based on lock status
       let result;
 
       if (isObligationLocked) {
-        // Will unlock + repay in one go
-        console.log("Using unlockAndRepayObligation due to locked obligation");
-        result = await unlockAndRepayObligation(
-          wallet,
-          obligationId!,
-          coinCfg.name as any,
-          baseUnits,
-          false // Not repaying maximum
+        // For locked obligations - use unlockAndRepay (sequential unlock then repay)
+        console.log(
+          "[handleSubmit] Using unlockAndRepay for locked obligation"
         );
+
+        if (repayMaximum) {
+          // For maximum repayment of locked obligations, let the service calculate the amount
+          result = await unlockAndRepay(
+            wallet,
+            obligationId!,
+            asset,
+            BigInt(0), // Amount is ignored when repayMaximum is true
+            true // repayMaximum flag
+          );
+        } else {
+          // For specific amount repayment of locked obligations
+          const amt = parseFloat(repayAmount);
+          const baseUnits = BigInt(
+            Math.floor(amt * Math.pow(10, coinCfg.decimals))
+          );
+          result = await unlockAndRepay(
+            wallet,
+            obligationId!,
+            asset,
+            baseUnits,
+            false
+          );
+        }
       } else {
-        // Simple repay using client API
-        console.log("Using regular repayObligation with client API");
-        result = await repayObligation(
-          wallet,
-          obligationId!,
-          coinCfg.name as any,
-          baseUnits,
-          false // Not repaying maximum
+        // For unlocked obligations
+        console.log(
+          "[handleSubmit] Using client.repay via repayUnlockedObligation"
         );
+
+        if (repayMaximum && currentDebt !== null) {
+          // For maximum repayment of unlocked obligations, calculate exact debt amount
+          // repayMaximumDebt will add a small buffer (1%) to account for accrued interest
+          result = await repayMaximumDebt(
+            wallet,
+            obligationId!,
+            asset,
+            currentDebt,
+            coinCfg.decimals
+          );
+        } else {
+          // For specific amount repayment of unlocked obligations
+          const amt = parseFloat(repayAmount);
+          const baseUnits = BigInt(
+            Math.floor(amt * Math.pow(10, coinCfg.decimals))
+          );
+          result = await repayUnlockedObligation(
+            wallet,
+            obligationId!,
+            asset,
+            baseUnits
+          );
+        }
       }
 
       console.log("Repayment result:", result);
 
       if (result.success) {
-        const successMessage = isObligationLocked
-          ? `Successfully unlocked obligation and repaid ${amt} ${selectedAsset}`
-          : `Successfully repaid ${amt} ${selectedAsset}`;
+        const successMessage = `Successfully ${
+          isObligationLocked ? "unlocked obligation and " : ""
+        }repaid ${repayMaximum ? "maximum" : repayAmount} ${selectedAsset}`;
 
         setTransactionResult({
           success: true,
@@ -537,7 +624,7 @@ const RepaymentModal: React.FC<RepaymentModalProps> = ({
       } else {
         setTransactionResult({
           success: false,
-          message: `Failed to repay ${amt} ${selectedAsset}`,
+          message: `Failed to repay ${selectedAsset}`,
           error: result.error,
         });
         setError(result.error || `Transaction failed`);
@@ -557,36 +644,35 @@ const RepaymentModal: React.FC<RepaymentModalProps> = ({
     }
   };
 
-  // Debug function to show all coin balances
-  const renderCoinBalances = () => {
-    if (!accountCoins.length) return "No coins found";
+  // Debug info and verification
+  const handleVerifyCoinTypes = () => {
+    console.log("Coin configuration:", COINS);
+    console.table({
+      "USDC name": COINS.USDC.name,
+      "USDT name": COINS.USDT.name,
+      "SUI name": COINS.SUI.name,
+    });
 
-    const relevantCoins = accountCoins.filter(
-      (coin) =>
-        coin.balance !== "0" &&
-        (coin.symbol === selectedAsset ||
-          (coin.coinType &&
-            COINS[selectedAsset as keyof typeof COINS]?.coinTypes.includes(
-              coin.coinType
-            )))
+    // Log the coin types we have in our account data
+    const coinTypes = accountCoins.map((coin) => coin.coinType);
+    console.log("Known wallet coin types from blockvision:", coinTypes);
+
+    // Check if any match our expected USDC types
+    const matchingUsdcTypes = coinTypes.filter((type) =>
+      COINS.USDC.coinTypes.includes(type)
     );
+    console.log("Matching USDC coin types:", matchingUsdcTypes);
 
-    return relevantCoins
-      .map((coin, idx) => {
-        const decimals =
-          coin.decimals ||
-          COINS[selectedAsset as keyof typeof COINS]?.decimals ||
-          9;
-        const humanReadable = Number(coin.balance) / Math.pow(10, decimals);
-
-        return (
-          <div key={`coin-${idx}`}>
-            {coin.symbol || selectedAsset}: {humanReadable.toFixed(6)}(
-            {coin.coinType?.slice(0, 10)}...{coin.coinType?.slice(-4)})
-          </div>
-        );
-      })
-      .join("");
+    // Log Scallop signer status
+    console.log("Wallet connected:", wallet.connected);
+    console.log("Wallet address:", wallet.address);
+    if (scallop.suiKit) {
+      console.log(
+        "Scallop suiKit currentAddress:",
+        scallop.suiKit.currentAddress
+      );
+      console.log("Signer set correctly:", signerSet);
+    }
   };
 
   // Don't render if not open
@@ -753,7 +839,9 @@ const RepaymentModal: React.FC<RepaymentModalProps> = ({
                     value={repayAmount}
                     onChange={handleAmountChange}
                     placeholder="0.00"
-                    className="amount-input"
+                    className={`amount-input ${
+                      repayMaximum ? "max-amount" : ""
+                    }`}
                   />
                   <div className="button-group">
                     <button
@@ -763,13 +851,28 @@ const RepaymentModal: React.FC<RepaymentModalProps> = ({
                       Use Safe Amount
                     </button>
                     {currentDebt !== null && currentDebt > 0 && (
-                      <button className="max-btn" onClick={handleUseMaxAmount}>
+                      <button
+                        className={`max-btn ${repayMaximum ? "active" : ""}`}
+                        onClick={handleUseMaxAmount}
+                      >
                         Max
                       </button>
                     )}
                   </div>
                 </div>
               </div>
+
+              {repayMaximum && (
+                <div className="max-repayment-notice">
+                  <InfoIcon />
+                  <span>
+                    You will repay the maximum possible amount up to your full
+                    debt of{" "}
+                    {currentDebt !== null ? formatNumber(currentDebt, 6) : "0"}{" "}
+                    {selectedAsset}
+                  </span>
+                </div>
+              )}
 
               {/* Add obligation ID display if provided */}
               {obligationId && (
@@ -835,6 +938,9 @@ const RepaymentModal: React.FC<RepaymentModalProps> = ({
                 <div className="status-indicator">
                   <span className="status-dot"></span>
                   Connected ({truncateAddress(wallet.address || "")})
+                  {signerSet && (
+                    <span className="signer-status"> ✓ SDK Connected</span>
+                  )}
                 </div>
               </div>
 
@@ -847,29 +953,41 @@ const RepaymentModal: React.FC<RepaymentModalProps> = ({
                 onClick={handleSubmit}
                 disabled={
                   !wallet.connected ||
+                  !signerSet ||
                   isLoading ||
-                  repayAmount === "" ||
+                  (!repayMaximum && repayAmount === "") ||
                   !currentDebt ||
                   currentDebt <= 0
                 }
               >
                 {isObligationLocked
-                  ? `Unlock Obligation & Repay ${selectedAsset}`
-                  : `Repay ${selectedAsset}`}
+                  ? `Unlock Obligation & Repay ${
+                      repayMaximum ? "Maximum" : selectedAsset
+                    }`
+                  : `Repay ${repayMaximum ? "Maximum" : selectedAsset}`}
               </button>
 
-              <button
-                className="debug-btn"
-                onClick={() => setShowDebugInfo(!showDebugInfo)}
-              >
-                {showDebugInfo ? "Hide Debug Info" : "Show Debug Info"}
-              </button>
+              <div className="debug-controls">
+                <button
+                  className="debug-btn"
+                  onClick={() => setShowDebugInfo(!showDebugInfo)}
+                >
+                  {showDebugInfo ? "Hide Debug Info" : "Show Debug Info"}
+                </button>
+                <button
+                  className="debug-btn verify-btn"
+                  onClick={handleVerifyCoinTypes}
+                >
+                  Verify Coin Types
+                </button>
+              </div>
 
               {showDebugInfo && (
                 <div className="debug-info">
                   <p>Obligation ID: {obligationId || "None"}</p>
                   <p>Prop Obligation ID: {propObligationId || "None"}</p>
                   <p>Obligation Locked: {isObligationLocked ? "Yes" : "No"}</p>
+                  <p>Repay Maximum: {repayMaximum ? "Yes" : "No"}</p>
                   <p>
                     Current Debt:{" "}
                     {currentDebt !== null ? currentDebt.toFixed(6) : "N/A"}{" "}
@@ -880,6 +998,50 @@ const RepaymentModal: React.FC<RepaymentModalProps> = ({
                     {walletBalance !== null ? walletBalance.toFixed(6) : "N/A"}{" "}
                     {selectedAsset}
                   </p>
+                  <h4>Asset Configuration:</h4>
+                  <div className="asset-config">
+                    <p>Selected Asset: {selectedAsset}</p>
+                    <p>
+                      Asset Name in SDK:{" "}
+                      {COINS[selectedAsset as keyof typeof COINS]?.name}
+                    </p>
+                    <p>
+                      Asset Decimals:{" "}
+                      {COINS[selectedAsset as keyof typeof COINS]?.decimals}
+                    </p>
+                    <p>
+                      Implementation: Using SDK v2.2.x stable with
+                      suiKit.useSigner
+                    </p>
+                  </div>
+                  <h4>Wallet & SDK Status:</h4>
+                  <div className="wallet-sdk-status">
+                    <p>
+                      Wallet Connected: {wallet.connected ? "Yes ✓" : "No ✗"}
+                    </p>
+                    <p>SDK Signer Set: {signerSet ? "Yes ✓" : "No ✗"}</p>
+                    <p>Wallet Address: {wallet.address}</p>
+                    <p>
+                      SuiKit Address:{" "}
+                      {scallop.suiKit?.currentAddress || "Not set"}
+                    </p>
+                  </div>
+                  <h4>Implementation Details:</h4>
+                  <div className="implementation-details">
+                    <p>
+                      Unlocked obligations: Using client.repay(asset, amount,
+                      true, obligationId)
+                    </p>
+                    <p>
+                      Locked obligations: Using sequential unlock then repay
+                      approach
+                    </p>
+                    <p>
+                      Wallet signer properly set via
+                      suiKit.useSigner(wallet.adapter)
+                    </p>
+                    <p>Using @mysten/sui@1.28.2 (modern SDK package)</p>
+                  </div>
                   <h4>Individual {selectedAsset} Coins:</h4>
                   <div className="coin-list">
                     {accountCoins
@@ -926,6 +1088,10 @@ const RepaymentModal: React.FC<RepaymentModalProps> = ({
                   </p>
                   <p>Account Coins Count: {accountCoins.length}</p>
                   <p>Is Initial Loading: {isInitialLoading ? "Yes" : "No"}</p>
+                  <p>
+                    SDK Functions: Using officially supported v2.2.0 methods
+                  </p>
+                  <p>SDK Version: 2.2.x with @mysten/sui version 1.28.2</p>
                 </div>
               )}
             </>
